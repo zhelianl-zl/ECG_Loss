@@ -34,6 +34,14 @@ from models import *
 from ensemble_fusion import FusionClassifier, AdversarialTrainingClassifier
 from cals import AugLagrangian, AugLagrangianClass
 
+# --- PE mode switches ---
+PE_MODE = "raw"          # "raw" | "logk" | "logk_rms"
+PE_RMS_BETA = 0.99       # EMA beta
+PE_RMS_EPS = 1e-8
+
+Normalize_entropy = (PE_MODE != "raw")     # reuse the original switch
+USE_PE_RMS = (PE_MODE == "logk_rms")
+
 imageNet_original = False
 
 torch.manual_seed(0)
@@ -99,6 +107,10 @@ def entropy(output):
 
 
 class Uncertainty(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.pe_rms_v = None  # EMA of E[p^2]
+
     def entropy_loss(self, model, X, y, num_samples=10, reduction='mean'):
         """Calculates the entropy loss of a probability distribution."""
         probs = None 
@@ -125,6 +137,17 @@ class Uncertainty(nn.Module):
             entropy_max = torch.log(_num_clases)
             entropy = torch.div(entropy, entropy_max) # normalized predictive entropy
 
+        # --- NEW: Adam-style RMS stabilization on PE_norm ---
+        if USE_PE_RMS:
+            # batch second moment (scalar), no gradient through statistics
+            m_t = torch.mean(entropy.detach() ** 2)
+
+            if self.pe_rms_v is None:
+                self.pe_rms_v = m_t
+            else:
+                self.pe_rms_v = PE_RMS_BETA * self.pe_rms_v + (1.0 - PE_RMS_BETA) * m_t
+
+            entropy = entropy / (torch.sqrt(self.pe_rms_v) + PE_RMS_EPS)
 
         if reduction=='mean':
             loss = torch.mean(entropy) #mean entropy
@@ -2397,9 +2420,16 @@ class trainModel():
             else:
                 y_pred = model(X_input)
 
-            # gradient alignment 
-            if decision[ct] and  attack == "fgsm_grad_align":
+            log_interval = 100 #log every 100 batches
+
+            # gradient alignment
+            if decision[ct] and attack == "fgsm_grad_align":
                 loss = self.LossFunction(model, X_input, y, y_pred, num_samples=num_samples)
+
+                if ct % log_interval == 0:
+                    v = getattr(self.LossFunction, "pe_rms_v", None)
+                    if v is not None:
+                        print("pe_rms_v:", v.detach().item())
 
                 # runs only if it's a adversarial exmaple and the attack is fgsm with gradient alignment 
                 reg = torch.zeros(1).cuda(self.device)[0]  # for .item() to run correctly
