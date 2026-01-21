@@ -70,7 +70,7 @@ LOSS_2nd_stage_correct = LOSS_MIN_CROSSENT_UNC
 option_stage2 = 'batch_mix2'
 #option_stage2 = 'batch_granularity'
 
-Normalize_entropy =  False #   True # 
+#Normalize_entropy =  False #   True # 
 cycle_lr = True #False #
 
 normalization = False #  True #
@@ -2891,7 +2891,12 @@ class trainModel():
 
         #test the accuracy of the model
         t3 = time.time()
-        test_err, test_loss, test_entropy, test_MI = self.test_epoch(self.loader.test_loader, self.model, num_samples=num_samples, models_name=models_name, write_pred_logs=write_pred_logs, iteration=iteration, calibration=calibration)
+        test_err, test_loss, test_entropy, test_MI, test_extra = self.test_epoch(
+            self.loader.test_loader, self.model,
+            num_samples=num_samples, models_name=models_name,
+            write_pred_logs=write_pred_logs, iteration=iteration,
+            calibration=calibration, return_details=True
+        )
         #test_err, test_loss = self.epoch(self.loader.test_loader, self.model)
         testTime = time.time() - t3
 
@@ -2941,7 +2946,7 @@ class trainModel():
 
                     t4 = time.time()
                     #adv_err, adv_loss = self.epoch_adversarial(self.loader.test_loader, self.model, "pgd", "", _eps_test, num_iterTest, alpha_test, 1, newLoss=False)
-                    adv_err, adv_loss, adv_entropy, adv_MI = self.test_epoch_adversarial(self.loader.test_loader, self.model, epsilon=_eps_test, num_iter=num_iterTest, alpha=alpha_test, num_samples=num_samples, models_name=models_name, write_pred_logs=write_pred_logs, iteration=iteration, calibration=calibration)
+                    adv_err, adv_loss, adv_entropy, adv_MI, adv_extra = self.test_epoch_adversarial(self.loader.test_loader, self.model, epsilon=_eps_test, num_iter=num_iterTest, alpha=alpha_test, num_samples=num_samples, models_name=models_name, write_pred_logs=write_pred_logs, iteration=iteration, calibration=calibration, return_details=True)
                     #if _eps_test == epsilon:
                     #    adv_err, adv_loss, adv_entropy, adv_MI = _adv_err, _adv_loss, _adv_entropy, _adv_MI
 
@@ -2987,6 +2992,28 @@ class trainModel():
         f.close()
         self.model.train() # go back to train mode
 
+        wandb.log({
+            # STD
+            "STD/Error": test_err,
+            "STD/Entropy": test_entropy,
+            "STD/MI": test_MI,
+            "STD/uA": test_extra["uA"],
+            "STD/uAUC": test_extra["uAUC"],
+            "STD/Corr": test_extra["Corr"],
+            "STD/Wasserstein": test_extra["Wasserstein"],
+            "STD/ECE": test_extra["ECE"],
+            "STD/u_thr": test_extra["u_thr"],
+
+            # PGD
+            "PGD/Error": adv_err,
+            "PGD/Entropy": adv_entropy,
+            "PGD/MI": adv_MI,
+            "PGD/uA": adv_extra["uA"],
+            "PGD/uAUC": adv_extra["uAUC"],
+            "PGD/Corr": adv_extra["Corr"],
+            "PGD/Wasserstein": adv_extra["Wasserstein"],
+            "PGD/ECE": adv_extra["ECE"],
+        }, step=iteration)
 
         return test_err, test_loss, test_entropy, test_MI, adv_err, adv_loss, adv_entropy, adv_MI
 
@@ -3050,161 +3077,424 @@ class trainModel():
 
         return normalized_entropy, normalized_mutual_information
 
+    """Comparison of Adam-EUAT against the baselines using different evaluation metrics"""
+    def _pearson_corr(a: np.ndarray, b: np.ndarray) -> float:
+        a = a.astype(np.float64)
+        b = b.astype(np.float64)
+        a = a - a.mean()
+        b = b - b.mean()
+        denom = (np.sqrt((a*a).mean()) * np.sqrt((b*b).mean()) + 1e-12)
+        return float((a*b).mean() / denom)
 
-    def test_epoch(self, loader, model, num_samples=10, models_name=None, write_pred_logs=False, iteration=-1, calibration=False):
-        """Standard training/evaluation epoch over the dataset"""
-        total_loss, total_err, total_entropy, total_mutual_information, counter_inputs = 0.,0.,0.,0.,0.
-        write_scores = True if 'binary' in models_name else False
+    def _wasserstein_1d(x: np.ndarray, y: np.ndarray) -> float:
+        # 1D Wasserstein distance via quantile matching
+        if len(x) == 0 or len(y) == 0:
+            return float("nan")
+        x = np.sort(x.astype(np.float64))
+        y = np.sort(y.astype(np.float64))
+        n = min(len(x), len(y))
+        # downsample to same length
+        xi = x[np.linspace(0, len(x)-1, n).astype(int)]
+        yi = y[np.linspace(0, len(y)-1, n).astype(int)]
+        return float(np.mean(np.abs(xi - yi)))
+
+    def _ece(conf: np.ndarray, correct: np.ndarray, n_bins: int = 15) -> float:
+        # Expected Calibration Error
+        conf = conf.astype(np.float64)
+        correct = correct.astype(np.float64)
+        bins = np.linspace(0.0, 1.0, n_bins + 1)
+        ece = 0.0
+        for i in range(n_bins):
+            lo, hi = bins[i], bins[i+1]
+            mask = (conf > lo) & (conf <= hi) if i > 0 else (conf >= lo) & (conf <= hi)
+            if mask.sum() == 0:
+                continue
+            acc_bin = correct[mask].mean()
+            conf_bin = conf[mask].mean()
+            ece += (mask.mean()) * abs(acc_bin - conf_bin)
+        return float(ece)
+
+    def _u_metrics_from_uncertainty(unc: np.ndarray, correct: np.ndarray):
+        """
+        Confusion by threshold t:
+        certain  : unc <= t
+        uncertain: unc >  t
+        TC = correct & certain
+        FU = correct & uncertain
+        FC = wrong   & certain
+        TU = wrong   & uncertain
+
+        uA(t)  = (TC + TU) / N   (paper's "uncertainty accuracy" style)
+        uAUC   = AUC of TCR vs FCR across thresholds
+        TCR = TC / (TC + FU)   (among correct, how many are certain)
+        FCR = FC / (FC + TU)   (among wrong, how many are (badly) certain)
+        """
+        unc = unc.astype(np.float64)
+        correct = correct.astype(bool)
+        wrong = ~correct
+        N = len(unc)
+
+        # sweep thresholds over sorted unique values (fast enough for CIFAR10)
+        thr = np.unique(unc)
+        # guard: if all same uncertainty
+        if len(thr) == 1:
+            t = thr[0]
+            certain = unc <= t
+            TC = np.sum(correct & certain)
+            TU = np.sum(wrong & (~certain))
+            uA = (TC + TU) / max(N, 1)
+            return float(uA), float("nan"), float(t), ([], [])
+
+        uA_list = []
+        TCR_list = []
+        FCR_list = []
+
+        for t in thr:
+            certain = unc <= t
+            TC = np.sum(correct & certain)
+            FU = np.sum(correct & (~certain))
+            FC = np.sum(wrong & certain)
+            TU = np.sum(wrong & (~certain))
+
+            uA = (TC + TU) / max(N, 1)
+            uA_list.append(uA)
+
+            TCR = TC / max(TC + FU, 1)
+            FCR = FC / max(FC + TU, 1)
+            TCR_list.append(TCR)
+            FCR_list.append(FCR)
+
+        # best uA threshold
+        idx_best = int(np.argmax(uA_list))
+        best_uA = float(uA_list[idx_best])
+        best_t = float(thr[idx_best])
+
+        # uAUC: integrate TCR(FCR) after sorting by FCR
+        FCR_arr = np.array(FCR_list, dtype=np.float64)
+        TCR_arr = np.array(TCR_list, dtype=np.float64)
+        order = np.argsort(FCR_arr)
+        FCR_arr = FCR_arr[order]
+        TCR_arr = TCR_arr[order]
+        uAUC = float(np.trapz(TCR_arr, FCR_arr))  # area under curve
+
+        return best_uA, uAUC, best_t, (FCR_arr.tolist(), TCR_arr.tolist())
+
+    def test_epoch(self, loader, model, num_samples=10, models_name=None,
+                write_pred_logs=False, iteration=-1, calibration=False,
+                return_details=False):
+
+        total_loss, total_err, total_entropy, total_mutual_information, counter_inputs = 0., 0., 0., 0., 0.
+        write_scores = True if (models_name is not None and 'binary' in models_name) else False
         lossfunc = nn.CrossEntropyLoss(reduction='none')
-        with torch.no_grad():
-            for X,y in loader:
-                _data = []
 
-                X,y = X.to(self.device), y.to(self.device) # len of bacth size
+        unc_all, correct_all, conf_all = [], [], []
+
+        with torch.no_grad():
+            for X, y in loader:
+                _data = []
+                X, y = X.to(self.device), y.to(self.device)
                 counter_inputs += len(y)
 
                 y_pred = model(X)
-                # when using ensembles the output is probablities of each class
 
+                # --- choose probs for metrics/logging ---
                 if self.deup:
-                    if write_scores: probs = F.softmax(y_pred, dim=1)
-                    total_err += (y_pred.max(dim=1)[1] != y).sum().item()
+                    probs_for_metrics = F.softmax(y_pred, dim=1)
+                    total_err += (probs_for_metrics.max(dim=1)[1] != y).sum().item()
 
-                    normalized_entropy =  self.deup_model.predict(X).t()[0]
+                    normalized_entropy = self.deup_model.predict(X).t()[0]
                     normalized_mutual_information = lossfunc(y_pred, y)
-                    # normalized_mutual_information is not use -  we just print the same
 
                 elif self.deep_ensemble:
-                    if write_scores: probs = y_pred
-                    total_err += (y_pred.max(dim=1)[1] != y).sum().item()
-                    normalized_entropy, normalized_mutual_information = self.MCdropout(model, X, y, num_samples=1, calibration=calibration) #, adversarial=False)
+                    probs_for_metrics = y_pred  # already probs
+                    total_err += (probs_for_metrics.max(dim=1)[1] != y).sum().item()
 
+                    normalized_entropy, normalized_mutual_information = self.MCdropout(
+                        model, X, y, num_samples=1, calibration=calibration
+                    )
 
                 elif calibration and self.isCalibrated:
                     probs = self.predict_proba(F.softmax(y_pred, dim=1))
-                    total_err += (probs.max(dim=1)[1] != y).sum().item()
-                    normalized_entropy, normalized_mutual_information = self.MCdropout(model, X, y, num_samples=num_samples, calibration=calibration) #, adversarial=False)
+                    probs_for_metrics = probs
+                    total_err += (probs_for_metrics.max(dim=1)[1] != y).sum().item()
+
+                    normalized_entropy, normalized_mutual_information = self.MCdropout(
+                        model, X, y, num_samples=num_samples, calibration=calibration
+                    )
 
                 else:
-                    if write_scores: probs = F.softmax(y_pred, dim=1)
-                    total_err += (y_pred.max(dim=1)[1] != y).sum().item()
-                    normalized_entropy, normalized_mutual_information = self.MCdropout(model, X, y, num_samples=num_samples, calibration=calibration) #, adversarial=False)
-                    #normalized_entropy, normalized_mutual_information = self.MCdropout(model, X, y, num_samples=num_samples) #, adversarial=False)
-                    #this prev line determines the uncertainty of a batch of inputs (but returns the uncertainties for all inputs/predictions in a batch)
-                    # so later we need to average them
-                    # but we deterime the cumulative uncertainty give N batches, so then we need to sum all entropies and average then                
-                    
-                total_entropy += (normalized_entropy.sum().item())
-                total_mutual_information += (normalized_mutual_information.sum().item())
-            
+                    probs_for_metrics = F.softmax(y_pred, dim=1)
+                    total_err += (probs_for_metrics.max(dim=1)[1] != y).sum().item()
 
+                    normalized_entropy, normalized_mutual_information = self.MCdropout(
+                        model, X, y, num_samples=num_samples, calibration=calibration
+                    )
+
+                # --- loss / entropy / MI totals ---
+                loss_batch = lossfunc(y_pred, y)
+                total_loss += loss_batch.sum().item()
+                total_entropy += normalized_entropy.sum().item()
+                total_mutual_information += normalized_mutual_information.sum().item()
+
+                # --- collect arrays for uncertainty metrics ---
+                pred = probs_for_metrics.max(dim=1)[1]
+                correct_batch = (pred == y).detach().cpu().numpy().astype(np.bool_)
+                unc_batch = normalized_entropy.detach().cpu().numpy().astype(np.float32)
+                conf_batch = probs_for_metrics.max(dim=1)[0].detach().cpu().numpy().astype(np.float32)
+
+                unc_all.append(unc_batch)
+                correct_all.append(correct_batch)
+                conf_all.append(conf_batch)
+
+                # --- existing prediction logs (keep) ---
                 if write_pred_logs and models_name is not None:
                     _entropy_normalized = normalized_entropy.tolist()
                     _normalized_mutual_information = normalized_mutual_information.tolist()
-                    _predictions = y_pred.max(dim=1)[1].tolist()
+                    _predictions = pred.tolist()
                     _y = y.tolist()
-                    if write_scores: _probs = probs.tolist()
+
+                    if write_scores:
+                        _probs = probs_for_metrics.tolist()
+
                     for i in range(len(y)):
-                        if write_scores: 
+                        if write_scores:
                             _probs_str = ""
                             for probs_ in _probs[i]:
                                 _probs_str += str(probs_) + ':'
-
-                            _data.append((iteration, _y[i], _predictions[i], _y[i]==_predictions[i], total_err/counter_inputs, total_loss/counter_inputs, \
-                                        _entropy_normalized[i], total_entropy/counter_inputs,  _normalized_mutual_information[i], total_mutual_information/counter_inputs, \
+                            _data.append((iteration, _y[i], _predictions[i], _y[i]==_predictions[i],
+                                        total_err/counter_inputs, total_loss/counter_inputs,
+                                        _entropy_normalized[i], total_entropy/counter_inputs,
+                                        _normalized_mutual_information[i], total_mutual_information/counter_inputs,
                                         _probs_str[:-1]))
                         else:
-                            _data.append((iteration, _y[i], _predictions[i], _y[i]==_predictions[i], total_err/counter_inputs, total_loss/counter_inputs, \
-                                        _entropy_normalized[i], total_entropy/counter_inputs,  _normalized_mutual_information[i], total_mutual_information/counter_inputs))
+                            _data.append((iteration, _y[i], _predictions[i], _y[i]==_predictions[i],
+                                        total_err/counter_inputs, total_loss/counter_inputs,
+                                        _entropy_normalized[i], total_entropy/counter_inputs,
+                                        _normalized_mutual_information[i], total_mutual_information/counter_inputs))
 
-                    if write_pred_logs==2:
-                        self.write_logs_prediction(_data, 'STD1' + models_name)
-                    else:
-                        self.write_logs_prediction(_data, 'STD' + models_name)
+                    self.write_logs_prediction(_data, ('STD1' if write_pred_logs==2 else 'STD') + models_name)
 
-                del X, y
+                del X, y, y_pred
                 torch.cuda.empty_cache()
 
-        return total_err/len(loader.dataset), total_loss/len(loader.dataset), total_entropy/len(loader.dataset), total_mutual_information/len(loader.dataset)
+        # --- after ALL batches: compute details ---
+        err = total_err / len(loader.dataset)
+        loss = total_loss / len(loader.dataset)
+        ent = total_entropy / len(loader.dataset)
+        mi = total_mutual_information / len(loader.dataset)
 
+        if not return_details:
+            return err, loss, ent, mi
 
-    def test_epoch_adversarial(self, loader, model, epsilon=0.1, num_iter=20, alpha=0.01, num_samples=10, models_name=None, write_pred_logs=False, iteration=-1, calibration=False,  **kwargs):
-        """Adversarial training/evaluation epoch over the dataset"""
-        total_loss, total_err, total_entropy, total_mutual_information, counter_inputs = 0.,0.,0.,0.,0.
-        write_scores = True if 'binary' in models_name else False
-        lossfunc = nn.CrossEntropyLoss(reduction='none')
-        
-        #with torch.no_grad():
-        for X,y in loader:
+        unc = np.concatenate(unc_all, axis=0)
+        corr = np.concatenate(correct_all, axis=0)
+        conf = np.concatenate(conf_all, axis=0)
+
+        err01 = (~corr).astype(np.float32)
+        Corr = self._pearson_corr(unc, err01)
+        Wass = self._wasserstein_1d(unc[corr], unc[~corr])
+        ECE = self._ece(conf, corr, n_bins=15)
+        uA, uAUC, best_thr, self._curve = self._u_metrics_from_uncertainty(unc, corr)
+
+        extra = {"uA": uA, "uAUC": uAUC, "Corr": Corr, "Wasserstein": Wass, "ECE": ECE, "u_thr": best_thr}
+        return err, loss, ent, mi, extra
+
+    def test_epoch_adversarial(
+        self,
+        loader,
+        model,
+        epsilon=0.1,
+        num_iter=20,
+        alpha=0.01,
+        num_samples=10,
+        models_name=None,
+        write_pred_logs=False,
+        iteration=-1,
+        calibration=False,
+        return_details=False,
+        **kwargs,
+    ):
+        """Adversarial training/evaluation epoch over the dataset (PGD Linf)."""
+
+        total_loss, total_err, total_entropy, total_mutual_information, counter_inputs = 0.0, 0.0, 0.0, 0.0, 0.0
+        write_scores = True if (models_name is not None and "binary" in models_name) else False
+        lossfunc = nn.CrossEntropyLoss(reduction="none")
+
+        # collect arrays for uncertainty metrics
+        unc_all, correct_all, conf_all = [], [], []
+
+        for X, y in loader:
             _data = []
             X, y = X.to(self.device), y.to(self.device)
             counter_inputs += len(y)
 
-            #LOSS and ACCURACY
-            #adversarial examples pgd_linf
-            delta = self.pgd_linf(model, X, y, epsilon=epsilon, num_iter=num_iter, alpha=alpha, num_samples=num_samples, CrossEntropyFunction=True, **kwargs) 
+            # ---- adversarial examples: pgd_linf ----
+            delta = self.pgd_linf(
+                model,
+                X,
+                y,
+                epsilon=epsilon,
+                num_iter=num_iter,
+                alpha=alpha,
+                num_samples=num_samples,
+                CrossEntropyFunction=True,
+                **kwargs,
+            )
             X_input = X + delta
+
+            # forward on adversarial inputs
             y_pred = model(X_input)
 
+            # ---- choose branch + compute uncertainty ----
+            # NOTE: probs_for_metrics is what we use for pred/conf (ECE)
+            probs_for_metrics = None
+
             if self.deup:
-                if write_scores: probs = F.softmax(y_pred, dim=1)
-                total_err += (y_pred.max(dim=1)[1] != y).sum().item()
-                
-                normalized_entropy =  self.deup_model.predict(X).t()[0]
+                # prediction probs
+                probs_for_metrics = F.softmax(y_pred, dim=1)
+                if write_scores:
+                    probs = probs_for_metrics
+                total_err += (probs_for_metrics.max(dim=1)[1] != y).sum().item()
+
+                # IMPORTANT: use adversarial inputs for uncertainty in adv eval
+                normalized_entropy = self.deup_model.predict(X_input).t()[0]
                 normalized_mutual_information = lossfunc(y_pred, y)
-                
+
             elif self.deep_ensemble:
-                if write_scores: probs = y_pred
-                total_err += (y_pred.max(dim=1)[1] != y).sum().item()
-                normalized_entropy, normalized_mutual_information = self.MCdropout(model, X, y, num_samples=1, calibration=calibration) #, adversarial=False)
+                # deep ensemble output is already probabilities
+                probs_for_metrics = y_pred
+                if write_scores:
+                    probs = probs_for_metrics
+                total_err += (probs_for_metrics.max(dim=1)[1] != y).sum().item()
+
+                # use adversarial inputs for uncertainty
+                normalized_entropy, normalized_mutual_information = self.MCdropout(
+                    model, X_input, y, num_samples=1, calibration=calibration
+                )
 
             elif calibration and self.isCalibrated:
+                # calibrated probabilities
                 probs = self.predict_proba(F.softmax(y_pred, dim=1))
-                total_err += (probs.max(dim=1)[1] != y).sum().item()
-                normalized_entropy, normalized_mutual_information = self.MCdropout(model, X_input, y, num_samples=num_samples, calibration=calibration)
+                probs_for_metrics = probs
+                total_err += (probs_for_metrics.max(dim=1)[1] != y).sum().item()
+
+                normalized_entropy, normalized_mutual_information = self.MCdropout(
+                    model, X_input, y, num_samples=num_samples, calibration=calibration
+                )
 
             else:
-                if write_scores: probs = F.softmax(y_pred, dim=1)
-                total_err += (y_pred.max(dim=1)[1] != y).sum().item()
+                probs_for_metrics = F.softmax(y_pred, dim=1)
+                if write_scores:
+                    probs = probs_for_metrics
+                total_err += (probs_for_metrics.max(dim=1)[1] != y).sum().item()
 
-                normalized_entropy, normalized_mutual_information = self.MCdropout(model, X_input, y, num_samples=num_samples, calibration=calibration)
-            #normalized_entropy, normalized_mutual_information = self.MCdropout(model, X_input, y, num_samples=num_samples) ,\
-            #                                                                adversarial=True, epsilon=epsilon, num_iter=num_iter, alpha=alpha, **kwargs)
-            
-            total_entropy += (normalized_entropy.sum().item())
-            total_mutual_information += (normalized_mutual_information.sum().item())
+                normalized_entropy, normalized_mutual_information = self.MCdropout(
+                    model, X_input, y, num_samples=num_samples, calibration=calibration
+                )
 
+            # ---- loss / totals ----
+            loss_batch = lossfunc(y_pred, y)
+            total_loss += loss_batch.sum().item()
 
+            total_entropy += normalized_entropy.sum().item()
+            total_mutual_information += normalized_mutual_information.sum().item()
+
+            # ---- collect arrays for extra metrics (uA/uAUC/Corr/Wass/ECE) ----
+            pred = probs_for_metrics.max(dim=1)[1]
+            correct_batch = (pred == y).detach().cpu().numpy().astype(np.bool_)
+            unc_batch = normalized_entropy.detach().cpu().numpy().astype(np.float32)
+            conf_batch = probs_for_metrics.max(dim=1)[0].detach().cpu().numpy().astype(np.float32)
+
+            unc_all.append(unc_batch)
+            correct_all.append(correct_batch)
+            conf_all.append(conf_batch)
+
+            # ---- write prediction logs (optional) ----
             if write_pred_logs and models_name is not None:
                 _entropy_normalized = normalized_entropy.tolist()
                 _normalized_mutual_information = normalized_mutual_information.tolist()
-                _predictions = y_pred.max(dim=1)[1].tolist()
+                _predictions = pred.tolist()
                 _y = y.tolist()
-                if write_scores: _probs = probs.tolist()
-                for i in range(len(y)):
-                    if write_scores: 
+
+                if write_scores:
+                    _probs = probs_for_metrics.tolist()
+
+                for i in range(len(_y)):
+                    if write_scores:
                         _probs_str = ""
                         for probs_ in _probs[i]:
-                            _probs_str += str(probs_) + ':'
+                            _probs_str += str(probs_) + ":"
 
-                        _data.append((iteration, _y[i], _predictions[i], _y[i]==_predictions[i], total_err/counter_inputs, total_loss/counter_inputs, \
-                                    _entropy_normalized[i], total_entropy/counter_inputs,  _normalized_mutual_information[i], total_mutual_information/counter_inputs, \
-                                     _probs_str[:-1]))
-                
+                        _data.append(
+                            (
+                                iteration,
+                                _y[i],
+                                _predictions[i],
+                                _y[i] == _predictions[i],
+                                total_err / counter_inputs,
+                                total_loss / counter_inputs,
+                                _entropy_normalized[i],
+                                total_entropy / counter_inputs,
+                                _normalized_mutual_information[i],
+                                total_mutual_information / counter_inputs,
+                                _probs_str[:-1],
+                            )
+                        )
                     else:
-                        _data.append((iteration, _y[i], _predictions[i], _y[i]==_predictions[i], total_err/counter_inputs, total_loss/counter_inputs, \
-                                    _entropy_normalized[i], total_entropy/counter_inputs,  _normalized_mutual_information[i], total_mutual_information/counter_inputs))
-                
-                if write_pred_logs==2:
-                    self.write_logs_prediction(_data, 'ADV1' + models_name)
+                        _data.append(
+                            (
+                                iteration,
+                                _y[i],
+                                _predictions[i],
+                                _y[i] == _predictions[i],
+                                total_err / counter_inputs,
+                                total_loss / counter_inputs,
+                                _entropy_normalized[i],
+                                total_entropy / counter_inputs,
+                                _normalized_mutual_information[i],
+                                total_mutual_information / counter_inputs,
+                            )
+                        )
+
+                if write_pred_logs == 2:
+                    self.write_logs_prediction(_data, "ADV1" + models_name)
                 else:
-                    self.write_logs_prediction(_data, 'ADV' + models_name)
-                    
-            del X, y, delta, X_input, normalized_mutual_information, normalized_entropy
+                    self.write_logs_prediction(_data, "ADV" + models_name)
+
+            # cleanup
+            del X, y, delta, X_input, y_pred, loss_batch, normalized_mutual_information, normalized_entropy
             torch.cuda.empty_cache()
 
-        return total_err/len(loader.dataset), total_loss/len(loader.dataset), total_entropy/len(loader.dataset), total_mutual_information/len(loader.dataset)
+        # ---- finalize epoch averages ----
+        adv_err = total_err / len(loader.dataset)
+        adv_loss = total_loss / len(loader.dataset)
+        adv_entropy = total_entropy / len(loader.dataset)
+        adv_mi = total_mutual_information / len(loader.dataset)
 
+        if not return_details:
+            return adv_err, adv_loss, adv_entropy, adv_mi
+
+        # ---- compute extra metrics after full loader ----
+        unc = np.concatenate(unc_all, axis=0)
+        corr = np.concatenate(correct_all, axis=0)
+        conf = np.concatenate(conf_all, axis=0)
+
+        err01 = (~corr).astype(np.float32)
+        Corr = self._pearson_corr(unc, err01)
+        Wass = self._wasserstein_1d(unc[corr], unc[~corr])
+        ECE = self._ece(conf, corr, n_bins=15)
+        uA, uAUC, best_thr, _curve = self._u_metrics_from_uncertainty(unc, corr)
+
+        adv_extra = {
+            "uA": uA,
+            "uAUC": uAUC,
+            "Corr": Corr,
+            "Wasserstein": Wass,
+            "ECE": ECE,
+            "u_thr": best_thr,
+        }
+
+        return adv_err, adv_loss, adv_entropy, adv_mi, adv_extra
 
     def write_logs_prediction(self, data, models_name):
 
