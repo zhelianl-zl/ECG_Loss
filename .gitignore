@@ -1,0 +1,23 @@
+# data & outputs
+data/
+logs/
+logs1/
+models/
+
+# checkpoints
+*.pt
+*.pth
+
+# large prediction files
+predictions_*.txt
+
+# python
+__pycache__/
+*.pyc
+
+# notebooks
+.ipynb_checkpoints/
+
+# OS / IDE
+.vscode/
+.DS_Store

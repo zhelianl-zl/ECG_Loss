@@ -24,6 +24,7 @@ import argparse, copy
 import pickle, time, random
 from PIL import Image
 import numpy as np
+import wandb
 
 #from math import log10, sqrt, log2, log
 
@@ -2429,7 +2430,10 @@ class trainModel():
                 if ct % log_interval == 0:
                     v = getattr(self.LossFunction, "pe_rms_v", None)
                     if v is not None:
-                        print("pe_rms_v:", v.detach().item())
+                        wandb.log({
+                            "loss": loss.detach().item(),
+                            "pe_rms_v": v.detach().item(),
+                        })
 
                 # runs only if it's a adversarial exmaple and the attack is fgsm with gradient alignment 
                 reg = torch.zeros(1).cuda(self.device)[0]  # for .item() to run correctly

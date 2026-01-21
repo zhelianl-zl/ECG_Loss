@@ -347,9 +347,37 @@ def main_preTrained():
             print("wronh type of experiment")
 
 
+import train
 
-if __name__ == '__main__':
-    #main()
+train.PE_MODE = "logk_rms"
+train.PE_RMS_BETA = 0.99
+train.PE_RMS_EPS = 1e-8
+train.Normalize_entropy = (train.PE_MODE != "raw")
+train.USE_PE_RMS = (train.PE_MODE == "logk_rms")
+
+if __name__ == "__main__":
+    import wandb
+    import train
+
+    # 1) set train.py globals BEFORE training starts
+    train.PE_MODE = "logk_rms"
+    train.PE_RMS_BETA = 0.99
+    train.PE_RMS_EPS = 1e-8
+    train.Normalize_entropy = (train.PE_MODE != "raw")
+    train.USE_PE_RMS = (train.PE_MODE == "logk_rms")
+
+    # 2) wandb init
+    wandb.init(
+        project="adam-euat",
+        name=f"cifar10_{train.PE_MODE}",
+        config={
+            "pe_mode": train.PE_MODE,
+            "pe_rms_beta": train.PE_RMS_BETA,
+            "dataset": "cifar10",
+        },
+    )
+
     main_preTrained()
+    wandb.finish()
 
 
