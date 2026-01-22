@@ -3979,6 +3979,14 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
+    def init_wandb_if_needed(args):
+        project = os.environ.get("WANDB_PROJECT", "adam-euat")
+        entity  = os.environ.get("WANDB_ENTITY", None)
+        name    = os.environ.get("WANDB_NAME", None)
+        wandb.init(project=project, entity=entity, name=name, config=vars(args))
+
+    init_wandb_if_needed(args)
+
     # override PE mode from CLI
     PE_MODE = args.pe_mode
     Normalize_entropy = (PE_MODE != "raw")
