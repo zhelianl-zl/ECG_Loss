@@ -40,7 +40,7 @@ PE_MODE = "raw"          # "raw" | "logk" | "logk_rms"
 PE_RMS_BETA = 0.99       # EMA beta
 PE_RMS_EPS = 1e-8
 
-Normalize_entropy = (PE_MODE != "raw")     # reuse the original switch
+Normalize_entropy = (PE_MODE != "raw")
 USE_PE_RMS = (PE_MODE == "logk_rms")
 
 imageNet_original = False
@@ -3963,7 +3963,38 @@ if __name__ == '__main__':
 
     parser.add_argument('--variants', type=str, help='calibration, deup, ensemble, cals', default='none')
 
+    parser.add_argument(
+        "--pe_mode",
+        type=str,
+        default="raw",
+        choices=["raw", "logk", "logk_rms"],
+        help="PE mode: raw (baseline), logk (PE/logK), logk_rms (PE/logK + RMS).",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=0,
+        help="Random seed for reproducibility.",
+    )
+
     args = parser.parse_args()
+
+    # override PE mode from CLI
+    PE_MODE = args.pe_mode
+    Normalize_entropy = (PE_MODE != "raw")
+    USE_PE_RMS = (PE_MODE == "logk_rms")
+
+    print(f"[CFG] pe_mode={PE_MODE} Normalize_entropy={Normalize_entropy} USE_PE_RMS={USE_PE_RMS} seed={args.seed}")
+
+    def set_seed(seed: int):
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
+    set_seed(args.seed)
 
     dataset_name = args.dataset
     if args.type == "std":
