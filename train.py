@@ -3179,7 +3179,7 @@ class trainModel():
         order = np.argsort(FCR_arr)
         FCR_arr = FCR_arr[order]
         TCR_arr = TCR_arr[order]
-        uAUC = float(np.trapz(TCR_arr, FCR_arr))  # area under curve
+        uAUC = float(np.trapezoid(TCR_arr, FCR_arr))  # area under curve
 
         return best_uA, uAUC, best_t, (FCR_arr.tolist(), TCR_arr.tolist())
 
