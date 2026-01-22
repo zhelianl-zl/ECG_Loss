@@ -3078,6 +3078,7 @@ class trainModel():
         return normalized_entropy, normalized_mutual_information
 
     """Comparison of Adam-EUAT against the baselines using different evaluation metrics"""
+    @staticmethod
     def _pearson_corr(a: np.ndarray, b: np.ndarray) -> float:
         a = a.astype(np.float64)
         b = b.astype(np.float64)
@@ -3086,6 +3087,7 @@ class trainModel():
         denom = (np.sqrt((a*a).mean()) * np.sqrt((b*b).mean()) + 1e-12)
         return float((a*b).mean() / denom)
 
+    @staticmethod
     def _wasserstein_1d(x: np.ndarray, y: np.ndarray) -> float:
         # 1D Wasserstein distance via quantile matching
         if len(x) == 0 or len(y) == 0:
@@ -3098,6 +3100,7 @@ class trainModel():
         yi = y[np.linspace(0, len(y)-1, n).astype(int)]
         return float(np.mean(np.abs(xi - yi)))
 
+    @staticmethod
     def _ece(conf: np.ndarray, correct: np.ndarray, n_bins: int = 15) -> float:
         # Expected Calibration Error
         conf = conf.astype(np.float64)
@@ -3114,6 +3117,7 @@ class trainModel():
             ece += (mask.mean()) * abs(acc_bin - conf_bin)
         return float(ece)
 
+    @staticmethod
     def _u_metrics_from_uncertainty(unc: np.ndarray, correct: np.ndarray):
         """
         Confusion by threshold t:
