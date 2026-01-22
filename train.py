@@ -1266,7 +1266,7 @@ class trainModel():
                         "train/err":  float(train_err),
                         "epoch": int(counter),
                         "lr": float(opt.param_groups[0]["lr"]),
-                    }, step=int(counter))
+                    })
                     print(f"[W&B] logged epoch={counter} loss={float(train_loss):.4f} err={float(train_err):.4f}", flush=True)
             except Exception as e:
                 print("[W&B log skipped]", e, flush=True)
