@@ -1258,6 +1258,20 @@ class trainModel():
             train_err, train_loss, misclassified_ids = self.epoch(loader.train_loader, model, opt, num_samples=num_samples, lagrangian=lagrangian)
             self.testModel_logs(dataset, modelName, counter, 'standard', 0 ,0, 0, 0, 0, time.time() - t1, write_pred_logs, num_samples=num_samples)
 
+            # ===== W&B: log once per epoch (add here) =====
+            try:
+                if wandb.run is not None:
+                    wandb.log({
+                        "train/loss": float(train_loss),
+                        "train/err":  float(train_err),
+                        "epoch": int(counter),
+                        "lr": float(opt.param_groups[0]["lr"]),
+                    }, step=int(counter))
+                    print(f"[W&B] logged epoch={counter} loss={float(train_loss):.4f} err={float(train_err):.4f}", flush=True)
+            except Exception as e:
+                print("[W&B log skipped]", e, flush=True)
+            # ============================================
+
             if counter % 5 == 0: 
                 print("saving model on epoch " + str(counter))
 
