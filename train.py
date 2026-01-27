@@ -4047,6 +4047,8 @@ if __name__ == '__main__':
     parser.add_argument("--ecg_conf_type", type=str, default="pmax", choices=["pmax", "1-pe", "none"])
     parser.add_argument("--ecg_detach_gates", type=str, default="True", choices=["True", "False"])
 
+    parser.add_argument("--force_run", action="store_true")
+
     args = parser.parse_args()
 
     args.ecg_detach_gates = (str(args.ecg_detach_gates).lower() == "true")
@@ -4114,6 +4116,11 @@ if __name__ == '__main__':
 
     modelName += f"_pe{args.pe_mode}"
 
+    modelName += f"_s1{args.stage1_epochs}_{args.loss_stage1}"
+    modelName += f"_s2{args.loss_stage2}"
+    if args.loss_stage2.startswith("ecg"):
+        modelName += f"_lam{args.ecg_lam}_tau{args.ecg_tau}_k{args.ecg_k}_conf{args.ecg_conf_type}_dg{int(args.ecg_detach_gates)}"
+
     #device = torch.device("cuda:" + str(args.workers) if torch.cuda.is_available() else "cpu")
     
     devices_id = [0]
@@ -4127,9 +4134,16 @@ if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if args.variants=='cals': modelName += '_cals'
     
-    toRun= True if not os.path.isfile("./logs/logs_" + modelName + ".txt") else False 
+    """toRun= True if not os.path.isfile("./logs/logs_" + modelName + ".txt") else False 
     if toRun:
         main(modelName, dataset_name, args.stop_val, args.stop, device, devices_id, args.lr, args.momentum, args.batch,  args.lr_adv, args.momentum_adv, 
                             args.batch_adv, args.half_prec, args.variants)  
     else:
-        print("config exists (no checkpointing is needed)")
+        print("config exists (no checkpointing is needed)")"""
+
+    toRun = args.force_run or (not os.path.isfile("./logs/logs_" + modelName + ".txt"))
+    if toRun:
+        main(modelName, dataset_name, args.stop_val, args.stop, device, devices_id, args.lr, args.momentum, args.batch,  args.lr_adv, args.momentum_adv, 
+                            args.batch_adv, args.half_prec, args.variants) 
+    else:
+        print("config exists (no checkpointing is needed)")        
