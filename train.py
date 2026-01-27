@@ -4022,7 +4022,34 @@ if __name__ == '__main__':
         help="Random seed for reproducibility.",
     )
 
+    # ---- 2-stage loss control (CE pretrain -> method finetune) ----
+    parser.add_argument("--stage1_epochs", type=int, default=30)
+    parser.add_argument("--stage2_epochs", type=int, default=30)
+
+    parser.add_argument(
+        "--loss_stage1",
+        type=str,
+        default="ce",
+        choices=["ce"],
+    )
+
+    parser.add_argument(
+        "--loss_stage2",
+        type=str,
+        default="ce",
+        choices=["ce", "euat", "ecg", "ecg_abl"],
+    )
+
+    # ---- ECG params ----
+    parser.add_argument("--ecg_lam", type=float, default=1.0)
+    parser.add_argument("--ecg_tau", type=float, default=0.7)
+    parser.add_argument("--ecg_k", type=float, default=10.0)
+    parser.add_argument("--ecg_conf_type", type=str, default="pmax", choices=["pmax", "1-pe", "none"])
+    parser.add_argument("--ecg_detach_gates", type=str, default="True", choices=["True", "False"])
+
     args = parser.parse_args()
+
+    args.ecg_detach_gates = (str(args.ecg_detach_gates).lower() == "true")
 
     def init_wandb_if_needed(args):
         project = os.environ.get("WANDB_PROJECT", "adam-euat")
