@@ -1158,13 +1158,11 @@ class trainModel():
         f.write(str1)
         f.close()
 
-
-    def saveModel(self, saveModel, state, filename, epoch):
-        if not saveModel: return
-
-        #torch.save(model.state_dict(), name)
-        torch.save(state,  "../models/" + filename + "_epoch" + str(epoch) + ".pt")
-        
+    def saveModel(self, isBest, state, filename, epoch):
+        save_dir = os.path.join(os.path.dirname(__file__), "models")  # /content/ECG_Loss/models
+        os.makedirs(save_dir, exist_ok=True)
+        save_path = os.path.join(save_dir, f"{filename}_epoch{epoch}.pt")
+        torch.save(state, save_path)
 
     def LoadModel(self, model, opt, filename):
         filename = "../models/" + filename + ".pt"
