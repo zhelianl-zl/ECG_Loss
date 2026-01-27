@@ -1264,7 +1264,7 @@ class trainModel():
             train_err, train_loss, misclassified_ids = self.epoch(loader.train_loader, model, opt, num_samples=num_samples, lagrangian=lagrangian)
             self.testModel_logs(dataset, modelName, counter, 'standard', 0 ,0, 0, 0, 0, time.time() - t1, write_pred_logs, num_samples=num_samples)
 
-            # ===== W&B: log once per epoch (step1) =====
+            # ===== W&B: log once per epoch (add here) =====
             try:
                 if wandb.run is not None:
                     wandb.log({
@@ -1272,12 +1272,11 @@ class trainModel():
                         "train/err":  float(train_err),
                         "epoch": int(counter),
                         "lr": float(opt.param_groups[0]["lr"]),
-                        "stage": 1,
-                    }, step=int(counter))
+                    })
                     print(f"[W&B] logged epoch={counter} loss={float(train_loss):.4f} err={float(train_err):.4f}", flush=True)
             except Exception as e:
                 print("[W&B log skipped]", e, flush=True)
-            # ==========================================
+            # ============================================
 
             if counter % 5 == 0: 
                 print("saving model on epoch " + str(counter))
@@ -1530,24 +1529,12 @@ class trainModel():
                 counter_dataSize += half_batch_size*2.0 #len(misclassified_ids)+len(correctclassified_ids)
                 #test
                 if counter_dataSize > epoch_dataSize:
-                    test_err, _, test_entropy, test_MI, _, _, _, _ = self.testModel_logs(
-                        dataset, modelName,
-                        counter,
-                        'standard',
-                        0, 0, 0, 0, 0,
-                        time.time() - t1,
-                        write_pred_logs,
-                        num_samples=num_samples
-                    )
-
-                    counter_dataSize = 0
-
-                    counter += 1
-                    epoch_counter += 1
-
+                    test_err, _, test_entropy, test_MI, _, _, _, _ = self.testModel_logs(dataset, modelName, epoch_counter+iterations, 'standard', 0 ,0, 0, 0, 0, time.time() - t1, write_pred_logs, num_samples=num_samples)
                     test_unc = test_entropy if UNCERTAINTY_MEASURE == 'PE' else test_MI
+                    counter_dataSize = 0
+                    epoch_counter +=1
 
-                    print(f"[STAGE2] finished epoch={counter-1}", flush=True)
+                    print("epoch number " + str(epoch_counter+iterations))
 
                     #del _subset_wrong,_subset_correct, _train_loader_wrong, _train_loader_correct
                     #torch.cuda.empty_cache()
@@ -2185,7 +2172,7 @@ class trainModel():
                 detach_gates=True
             )
 
-            if getattr(self, "use_wandb", False):
+            if self.use_wandb:
                 import wandb
                 wandb.log(stats)
 
@@ -3749,8 +3736,6 @@ class model(trainModel):
         dampening=0
         weight_decay=0 if self.dataset_name != "imageNet" else 0.0001
         nesterov=False
-
-        self.use_wandb = False  # or True if you always want it on
 
         self.opt = optim.SGD(self.model.parameters(), lr=lr, momentum=momentum, dampening=dampening, weight_decay=weight_decay, nesterov=nesterov)
 
