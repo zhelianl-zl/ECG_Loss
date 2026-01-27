@@ -35,6 +35,9 @@ from models import *
 from ensemble_fusion import FusionClassifier, AdversarialTrainingClassifier
 from cals import AugLagrangian, AugLagrangianClass
 
+from ecg_loss import ecg_loss
+LOSS_ECG = "ecg"
+
 # --- PE mode switches ---
 PE_MODE = "raw"          # "raw" | "logk" | "logk_rms"
 PE_RMS_BETA = 0.99       # EMA beta
@@ -61,9 +64,12 @@ UNCERTAINTY_MEASURE = "PE"
 
 
 #LOSS_2nd_stage = LOSS_MAX_UNC
-LOSS_2nd_stage_wrong = LOSS_MIN_CROSSENT_MAX_UNC
+#LOSS_2nd_stage_wrong = LOSS_MIN_CROSSENT_MAX_UNC # before
 #LOSS_2nd_stage_correct = LOSS_MIN_CROSSENT
-LOSS_2nd_stage_correct = LOSS_MIN_CROSSENT_UNC
+#LOSS_2nd_stage_correct = LOSS_MIN_CROSSENT_UNC # before
+
+LOSS_2nd_stage_wrong = LOSS_ECG
+LOSS_2nd_stage_correct = LOSS_ECG
 
 #option_stage2 = 'mix'
 #option_stage2 = 'batch_mix'
@@ -2156,6 +2162,22 @@ class trainModel():
         # LOSS_MIN_CROSSENT_MAX_UNC = 2 # minimize cross_entropy_loss - uncertainty = minimize cross_entropy_loss + maximize uncertainty 
         # LOSS_MIN_UNC = 3 # minimize -uncertainty = maximize uncertainty 
         
+        if self.LossInUse == LOSS_ECG:
+            loss, stats = ecg_loss(
+                y_pred, y,
+                lam=self.ecg_lam,
+                tau=self.ecg_tau,
+                k=self.ecg_k,
+                conf_type=self.ecg_conf_type,
+                detach_gates=True
+            )
+
+            if self.use_wandb:
+                import wandb
+                wandb.log(stats)
+
+            return loss
+
         if CrossEntropyFunction:
             # to test the model
             return nn.CrossEntropyLoss()(y_pred, y) #CrossEntropy_Loss()(model, X, y, y_pred, num_samples)
@@ -3691,6 +3713,11 @@ class trainModel():
 
 class model(trainModel):
     def __init__(self, dataset, dataset_name, device, devices_id, lr=0.1, momentum=0, lr_adv=0.1, momentum_adv=0, batch_adv=100, half_prec=False, variants=None):
+        self.ecg_lam = 1.0
+        self.ecg_tau = 0.7
+        self.ecg_k = 10.0
+        self.ecg_conf_type = "pmax"
+        
         self.loader = dataset
         self.dataset_name = dataset_name 
         self.lr = lr 
@@ -4057,6 +4084,8 @@ if __name__ == '__main__':
 
     modelName += "_lr" + str(args.lr) + "_momentum" + str(args.momentum) + "_batch" + str(args.batch)
     modelName += "_lrAdv" + str(args.lr_adv) + "_momentumAdv" + str(args.momentum_adv) + "_batchAdv" + str(args.batch_adv)
+
+    modelName += f"_pe{args.pe_mode}"
 
     #device = torch.device("cuda:" + str(args.workers) if torch.cuda.is_available() else "cpu")
     
