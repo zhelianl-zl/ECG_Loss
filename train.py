@@ -1540,19 +1540,6 @@ class trainModel():
                         num_samples=num_samples
                     )
 
-                    try:
-                        if wandb.run is not None:
-                            wandb.log(
-                                {
-                                    "lr": float(opt.param_groups[0]["lr"]),
-                                    "epoch": int(counter),
-                                    "stage": 2,
-                                },
-                                step=int(counter),
-                            )
-                    except Exception as e:
-                        print("[W&B lr/epoch log skipped]", e, flush=True)
-
                     counter_dataSize = 0
 
                     counter += 1
