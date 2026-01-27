@@ -1116,7 +1116,7 @@ class trainModel():
             print('cals enable')
         
         self.LossInUse = LOSS_MIN_CROSSENT # LOSS_MIN_CROSSENT_UNC # 
-        self.new_iterations = iterations if iterations < 30 else 30 #10 # 
+        self.new_iterations = 30 #10 # 
         #####
         # this argument is used to specify the number of iteration of EUAT
         ####
@@ -1298,7 +1298,13 @@ class trainModel():
 
         write_pred_logs = True
 
-        
+        # ===== STAGE2 hard skip for sanity =====
+        max_stage2_epochs = int(getattr(self, "stage2_epochs", 0))  # 默认 0
+        if max_stage2_epochs <= 0:
+            print("[STAGE2] skipped because stage2_epochs=0", flush=True)
+            return time.time() - t1, train_err, train_loss
+        # ======================================
+
         if option_stage2 == 'batch_mix2':
             #separetes into different batchs the wrong and correct predicitons and uses differetn loss functions
             # min error for correct batch
@@ -1464,7 +1470,7 @@ class trainModel():
 
             print("epoch number " + str(epoch_counter+iterations) + " and epoch size of " + str(epoch_dataSize))
 
-            while epoch_counter < self.new_iterations+1:
+            while epoch_counter < self.max_stage2_epochs+1:
 
                 _, _, misclassified_ids = self.epoch(loader.train_loader, model) #test with training data
                 aux_correctclassified_ids = [i for i in range(epoch_dataSize) if i not in misclassified_ids]
@@ -3752,7 +3758,7 @@ class model(trainModel):
         weight_decay=0 if self.dataset_name != "imageNet" else 0.0001
         nesterov=False
 
-        self.use_wandb = False  # or True if you always want it on
+        self.use_wandb = (wandb.run is not None)  # or True if you always want it on
 
         self.opt = optim.SGD(self.model.parameters(), lr=lr, momentum=momentum, dampening=dampening, weight_decay=weight_decay, nesterov=nesterov)
 
@@ -3972,10 +3978,20 @@ class model(trainModel):
         return model.to(self.device)
 
 
-def main(modelName, dataset_name, iterations=10, stop="epochs", device=None, devices_id=None, lr=0.1, momentum=0, batch=100, lr_adv=0.1, momentum_adv=0, batch_adv=100, half_prec=False, variants=False):
+def main(modelName, dataset_name, stop_val, stop,
+         stage1_epochs, stage2_epochs,
+         device, devices_id, lr, momentum, batch, lr_adv, momentum_adv, batch_adv,
+         half_prec=False, variants='none'):
     
     dataset_loader = dataset(dataset_name=dataset_name, batch_size = batch, batch_size_adv = batch_adv)
     model_cnn = model(dataset_loader, dataset_name, device, devices_id, lr, momentum, lr_adv, momentum_adv, batch_adv, half_prec=half_prec, variants=variants)
+    model_cnn.stage1_epochs = int(stage1_epochs)
+    model_cnn.stage2_epochs = int(stage2_epochs)
+
+    model_cnn.new_iterations = int(stage2_epochs)
+
+    model_cnn.use_wandb = (wandb.run is not None)
+    
     trainTime, train_err, train_loss = model_cnn.run(modelName, iterations=iterations, stop=stop) # train
 
     return
@@ -4160,7 +4176,14 @@ if __name__ == '__main__':
 
     toRun = args.force_run or (not os.path.isfile("./logs/logs_" + modelName + ".txt"))
     if toRun:
-        main(modelName, dataset_name, args.stop_val, args.stop, device, devices_id, args.lr, args.momentum, args.batch,  args.lr_adv, args.momentum_adv, 
-                            args.batch_adv, args.half_prec, args.variants) 
+        main(
+            modelName, dataset_name,
+            args.stop_val, args.stop,
+            args.stage1_epochs, args.stage2_epochs,
+            device, devices_id,
+            args.lr, args.momentum, args.batch,
+            args.lr_adv, args.momentum_adv, args.batch_adv,
+            args.half_prec, args.variants
+        )
     else:
         print("config exists (no checkpointing is needed)")        
