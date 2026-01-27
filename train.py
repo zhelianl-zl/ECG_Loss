@@ -2198,7 +2198,7 @@ class trainModel():
                 detach_gates=True
             )
 
-            if self.use_wandb:
+            if getattr(self, "use_wandb", False):
                 import wandb
                 wandb.log(stats)
 
@@ -3762,6 +3762,8 @@ class model(trainModel):
         dampening=0
         weight_decay=0 if self.dataset_name != "imageNet" else 0.0001
         nesterov=False
+
+        self.use_wandb = False  # or True if you always want it on
 
         self.opt = optim.SGD(self.model.parameters(), lr=lr, momentum=momentum, dampening=dampening, weight_decay=weight_decay, nesterov=nesterov)
 
