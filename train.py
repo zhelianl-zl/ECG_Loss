@@ -3992,7 +3992,9 @@ def main(modelName, dataset_name, stop_val, stop,
 
     model_cnn.use_wandb = (wandb.run is not None)
     
-    trainTime, train_err, train_loss = model_cnn.run(modelName, iterations=iterations, stop=stop) # train
+    # 在 main(...) 里，创建完 model_cnn 之后
+
+    trainTime, train_err, train_loss = model_cnn.run(modelName, iterations=int(stop_val), stop=stop)
 
     return
 
