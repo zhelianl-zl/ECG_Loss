@@ -2188,7 +2188,7 @@ class trainModel():
                 tau=self.ecg_tau,
                 k=self.ecg_k,
                 conf_type=self.ecg_conf_type,
-                detach_gates=True
+                detach_gates=getattr(self, "ecg_detach_gates", True)
             )
 
             if getattr(self, "use_wandb", False):
@@ -3983,6 +3983,11 @@ def main(modelName, dataset_name, stop_val, stop,
     
     dataset_loader = dataset(dataset_name=dataset_name, batch_size = batch, batch_size_adv = batch_adv)
     model_cnn = model(dataset_loader, dataset_name, device, devices_id, lr, momentum, lr_adv, momentum_adv, batch_adv, half_prec=half_prec, variants=variants)
+    model_cnn.ecg_lam = float(args.ecg_lam)
+    model_cnn.ecg_tau = float(args.ecg_tau)
+    model_cnn.ecg_k = float(args.ecg_k)
+    model_cnn.ecg_conf_type = str(args.ecg_conf_type)
+    model_cnn.ecg_detach_gates = bool(args.ecg_detach_gates)
     model_cnn.stage1_epochs = int(stage1_epochs)
     model_cnn.stage2_epochs = int(stage2_epochs)
 
@@ -3992,7 +3997,7 @@ def main(modelName, dataset_name, stop_val, stop,
     
     # 在 main(...) 里，创建完 model_cnn 之后
 
-    trainTime, train_err, train_loss = model_cnn.run(modelName, iterations=int(stop_val), stop=stop)
+    trainTime, train_err, train_loss = model_cnn.run(modelName, iterations=int(stage1_epochs), stop=stop)
 
     return
 
@@ -4085,6 +4090,26 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     args.ecg_detach_gates = (str(args.ecg_detach_gates).lower() == "true")
+
+    def _apply_stage2_from_args(args):
+        global LOSS_2nd_stage_wrong, LOSS_2nd_stage_correct, option_stage2
+        if args.loss_stage2 == "ce":
+            LOSS_2nd_stage_wrong = LOSS_MIN_CROSSENT
+            LOSS_2nd_stage_correct = LOSS_MIN_CROSSENT
+            option_stage2 = "batch_mix2"
+        elif args.loss_stage2 == "euat":
+            LOSS_2nd_stage_wrong = LOSS_MIN_CROSSENT_MAX_UNC
+            LOSS_2nd_stage_correct = LOSS_MIN_CROSSENT
+            option_stage2 = "batch_mix2"
+        elif args.loss_stage2 in ("ecg", "ecg_abl"):
+            LOSS_2nd_stage_wrong = LOSS_ECG
+            LOSS_2nd_stage_correct = LOSS_ECG
+            option_stage2 = "batch_mix2"
+        else:
+            raise ValueError(f"Unknown --loss_stage2: {args.loss_stage2}")
+
+    _apply_stage2_from_args(args)
+    print(f"[CFG] LOSS2 wrong={LOSS_2nd_stage_wrong}, correct={LOSS_2nd_stage_correct}, option={option_stage2}")
 
     def init_wandb_if_needed(args):
         project = os.environ.get("WANDB_PROJECT", "adam-euat")
