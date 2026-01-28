@@ -29,6 +29,9 @@ def ecg_loss(logits, targets, lam=1.0, tau=0.7, k=10.0, conf_type="pmax", detach
         pe = -(p * (p.clamp_min(eps)).log()).sum(dim=1)
         pe_norm = pe / math.log(C)
         conf = 1.0 - pe_norm
+    elif conf_type == "none":
+        conf = p.max(dim=1).values
+        conf_gate = torch.ones_like(conf)
     else:
         raise ValueError("bad conf_type")
 
