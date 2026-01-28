@@ -3978,24 +3978,25 @@ class model(trainModel):
 
 def main(modelName, dataset_name, stop_val, stop,
          stage1_epochs, stage2_epochs,
+         ecg_lam, ecg_tau, ecg_k, ecg_conf_type, ecg_detach_gates,
          device, devices_id, lr, momentum, batch, lr_adv, momentum_adv, batch_adv,
          half_prec=False, variants='none'):
     
     dataset_loader = dataset(dataset_name=dataset_name, batch_size = batch, batch_size_adv = batch_adv)
     model_cnn = model(dataset_loader, dataset_name, device, devices_id, lr, momentum, lr_adv, momentum_adv, batch_adv, half_prec=half_prec, variants=variants)
-    model_cnn.ecg_lam = float(args.ecg_lam)
-    model_cnn.ecg_tau = float(args.ecg_tau)
-    model_cnn.ecg_k = float(args.ecg_k)
-    model_cnn.ecg_conf_type = str(args.ecg_conf_type)
-    model_cnn.ecg_detach_gates = bool(args.ecg_detach_gates)
+    # ECG hyperparams from CLI
+    model_cnn.ecg_lam = float(ecg_lam)
+    model_cnn.ecg_tau = float(ecg_tau)
+    model_cnn.ecg_k = float(ecg_k)
+    model_cnn.ecg_conf_type = str(ecg_conf_type)
+    model_cnn.ecg_detach_gates = bool(ecg_detach_gates)
     model_cnn.stage1_epochs = int(stage1_epochs)
     model_cnn.stage2_epochs = int(stage2_epochs)
 
     model_cnn.new_iterations = int(stage2_epochs)
 
     model_cnn.use_wandb = (wandb.run is not None)
-    
-    # 在 main(...) 里，创建完 model_cnn 之后
+    model_cnn.new_iterations = int(stage2_epochs)
 
     trainTime, train_err, train_loss = model_cnn.run(modelName, iterations=int(stage1_epochs), stop=stop)
 
@@ -4005,9 +4006,9 @@ def main(modelName, dataset_name, stop_val, stop,
 def str2bool(v):
     if isinstance(v, bool):
        return v
-    if v.lower() in ('True', 'yes', 'true', 't', 'y', '1'):
+    if str(v).lower() in ('true', 'yes', 't', 'y', '1'):
         return True
-    elif v.lower() in ('False', 'no', 'false', 'f', 'n', '0'):
+    elif str(v).lower() in ('false', 'no', 'f', 'n', '0'):
         return False
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
@@ -4083,13 +4084,11 @@ if __name__ == '__main__':
     parser.add_argument("--ecg_tau", type=float, default=0.7)
     parser.add_argument("--ecg_k", type=float, default=10.0)
     parser.add_argument("--ecg_conf_type", type=str, default="pmax", choices=["pmax", "1-pe", "none"])
-    parser.add_argument("--ecg_detach_gates", type=str, default="True", choices=["True", "False"])
+    parser.add_argument("--ecg_detach_gates", type=str2bool, default=True)
 
     parser.add_argument("--force_run", action="store_true")
 
     args = parser.parse_args()
-
-    args.ecg_detach_gates = (str(args.ecg_detach_gates).lower() == "true")
 
     def _apply_stage2_from_args(args):
         global LOSS_2nd_stage_wrong, LOSS_2nd_stage_correct, option_stage2
@@ -4205,6 +4204,7 @@ if __name__ == '__main__':
             modelName, dataset_name,
             args.stop_val, args.stop,
             args.stage1_epochs, args.stage2_epochs,
+            args.ecg_lam, args.ecg_tau, args.ecg_k, args.ecg_conf_type, args.ecg_detach_gates,
             device, devices_id,
             args.lr, args.momentum, args.batch,
             args.lr_adv, args.momentum_adv, args.batch_adv,
