@@ -1165,10 +1165,12 @@ class trainModel():
         torch.save(state, save_path)
 
     def LoadModel(self, model, opt, filename):
-        filename = "../models/" + filename + ".pt"
-        if os.path.isfile(filename):
-            print("=> loading checkpoint '{}'".format(filename))
-            checkpoint = torch.load(filename)
+        model_dir = os.path.join(os.path.dirname(__file__), "models")
+        ckpt_path = os.path.join(model_dir, filename + ".pt")
+
+        if os.path.isfile(ckpt_path):
+            print("=> loading checkpoint '{}'".format(ckpt_path))
+            checkpoint = torch.load(ckpt_path, map_location="cpu")
 
             start_epoch = checkpoint['epoch']
 
