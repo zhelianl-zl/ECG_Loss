@@ -3814,12 +3814,12 @@ class model(trainModel):
         self.model.train()
         if ckptName is None: ckptName = modelName
         if runName  is None: runName  = modelName
-        return self._train_epochs(modelName, iterations=iterations, ckptName=ckptName, runName=runName)
+        return self._train_epochs(modelName, iterations=iterations, stop=stop, ckptName=ckptName, runName=runName)
 
-
-
-    def _train_epochs(self, modelName, iterations=10):
+    def _train_epochs(self, modelName, iterations=10, stop="epochs", ckptName=None, runName=None):
         ''' uploads the models or trains it from scratch'''
+        if ckptName is None: ckptName = modelName
+        if runName  is None: runName  = modelName
 
         path = "./models/" + modelName
         if "binaryCifar10" in modelName:
@@ -3875,11 +3875,17 @@ class model(trainModel):
 
         else:
             #train all model with checkpointing and early stopping (only used fo standard training to differentiate the full standard training and pre-training) 
-            trainTime, train_err, train_loss = self.standard_train(self.model, runName, self.loader, _dataset, self.opt,
-                    iterations=iterations, ckptName=ckptName, runName=runName)
-
+                trainTime, train_err, train_loss = self.standard_train(
+                        self.model,
+                        runName,
+                        self.loader,
+                        _dataset,
+                        self.opt,
+                        iterations=iterations,
+                        ckptName=ckptName,
+                        runName=runName
+                    )
         return trainTime, train_err, train_loss
-        
 
     def testModel(self):
         '''test the model at the end to evaluate standard accuracy'''
