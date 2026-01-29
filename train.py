@@ -4150,13 +4150,52 @@ def init_wandb_if_needed(args, default_name: str):
 
     print(f"[CFG] pe_mode={PE_MODE} Normalize_entropy={Normalize_entropy} USE_PE_RMS={USE_PE_RMS} seed={args.seed}")
 
-    def set_seed(seed: int):
-        random.seed(seed)
-        np.random.seed(seed)
-        torch.manual_seed(seed)
-        torch.cuda.manual_seed_all(seed)
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
+def set_seed(seed: int):
+    import random, numpy as np, torch
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+def init_wandb_if_needed(args, default_name: str):
+    import os, wandb
+    project = os.environ.get("WANDB_PROJECT", "ecg-loss")
+    entity  = os.environ.get("WANDB_ENTITY", None)
+    name    = os.environ.get("WANDB_NAME", None) or default_name
+    group   = os.environ.get("WANDB_GROUP", None) or f"{args.dataset}_seed{args.seed}_T{args.stop_val}"
+
+    tags_env = os.environ.get("WANDB_TAGS", "")
+    tags = [t.strip() for t in tags_env.split(",") if t.strip()]
+
+    base_tags = {
+        args.dataset, f"seed{args.seed}", f"s1{args.stage1_epochs}", f"s2{args.stage2_epochs}",
+        f"loss2_{args.loss_stage2}", f"pe_{args.pe_mode}",
+    }
+    tags = sorted(set(tags) | base_tags)
+
+    wandb.init(
+        project=project,
+        entity=entity,
+        name=name,
+        group=group,
+        tags=tags,
+        job_type=os.environ.get("WANDB_JOB_TYPE", None),
+        config=vars(args),
+    )
+
+    global PE_MODE, Normalize_entropy, USE_PE_RMS
+    PE_MODE = args.pe_mode
+    Normalize_entropy = (PE_MODE != "raw")
+    USE_PE_RMS = (PE_MODE == "logk_rms")
+    print(f"[CFG] pe_mode={PE_MODE} Normalize_entropy={Normalize_entropy} USE_PE_RMS={USE_PE_RMS} seed={args.seed}")
+
+if __name__ == "__main__":
+    args = parser.parse_args()
+
+    _apply_stage2_from_args(args)
+    print(f"[CFG] LOSS2 wrong={LOSS_2nd_stage_wrong}, correct={LOSS_2nd_stage_correct}, option={option_stage2}")
 
     set_seed(args.seed)
 
@@ -4166,68 +4205,23 @@ def init_wandb_if_needed(args, default_name: str):
         args.ratio_adv = 0.0
 
     modelName = "model" + dataset_name
-
-    if args.type == "std":
-        modelName += "_std_train"
-
-    else: #robust
-        if "fgsm" in args.alg:
-            modelName += "_robust_FGSM"
-            if "rs" in args.alg:
-                modelName += "rs"
-            elif 'free' in args.alg:
-                modelName += "free"
-            elif 'grad_align' in args.alg:
-                modelName += "gradAlign"
-
-            modelName += "_eps" + str(args.epsilon) + "_ratio" + str(args.ratio) + "_ratioadv" + str(args.ratio_adv)
-
-        else: #pgd
-            modelName += "_robust_PGD"
-            if "rs" in args.alg:
-                modelName += "rs"
-            elif 'free' in args.alg:
-                modelName += "free"
-            elif 'grad_align' in args.alg:
-                modelName += "gradAlign"
-
-            modelName += "_eps" + str(args.epsilon) + "_numIt" + str(args.num_iter) + "_alpha" + str(args.alpha) + "_ratio" + str(args.ratio) + "_ratioadv" + str(args.ratio_adv)
-
+    modelName += "_std_train" if args.type == "std" else "_robust"
     modelName += "_lr" + str(args.lr) + "_momentum" + str(args.momentum) + "_batch" + str(args.batch)
     modelName += "_lrAdv" + str(args.lr_adv) + "_momentumAdv" + str(args.momentum_adv) + "_batchAdv" + str(args.batch_adv)
-
     modelName += f"_pe{args.pe_mode}"
-
     modelName += f"_s1{args.stage1_epochs}_{args.loss_stage1}"
     modelName += f"_s2{args.loss_stage2}"
     if args.loss_stage2.startswith("ecg"):
         modelName += f"_lam{args.ecg_lam}_tau{args.ecg_tau}_k{args.ecg_k}_conf{args.ecg_conf_type}_dg{int(args.ecg_detach_gates)}"
 
-    #device = torch.device("cuda:" + str(args.workers) if torch.cuda.is_available() else "cpu")
-    
+    import torch, os, sys
     devices_id = [0]
-    if args.dataset == 'imageNet' or args.dataset == 'svhn':
-        aux_workers = args.workers.split(",")
-        if len(aux_workers) > 1:
-            devices_id = []
-            for aux_w in  aux_workers:
-                devices_id.append(int(aux_w))
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    if args.variants=='cals': modelName += '_cals'
-    
-    """toRun= True if not os.path.isfile("./logs/logs_" + modelName + ".txt") else False 
-    if toRun:
-        main(modelName, dataset_name, args.stop_val, args.stop, device, devices_id, args.lr, args.momentum, args.batch,  args.lr_adv, args.momentum_adv, 
-                            args.batch_adv, args.half_prec, args.variants)  
-    else:
-        print("config exists (no checkpointing is needed)")"""
 
     toRun = args.force_run or (not os.path.isfile("./logs/logs_" + modelName + ".txt"))
-
     if not toRun:
         print("config exists (no checkpointing is needed)")
-        return
+        sys.exit(0)
 
     init_wandb_if_needed(args, default_name=modelName)
 
@@ -4240,4 +4234,4 @@ def init_wandb_if_needed(args, default_name: str):
         args.lr, args.momentum, args.batch,
         args.lr_adv, args.momentum_adv, args.batch_adv,
         args.half_prec, args.variants
-    )   
+    )
