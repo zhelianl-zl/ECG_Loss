@@ -1205,37 +1205,64 @@ class trainModel():
 
         return model, opt, training_time, train_err, train_loss, start_epoch
 
+    def updateLogs(self, oldName, NewName, alg, ratio, epsilon, numIt, alpha, ratioADV, epochMax):
+        os.makedirs("./logs", exist_ok=True)
 
-    def updateLogs(self, oldName, NewName, alg, ratio ,epsilon, numIt, alpha, ratioADV, epochMax):
+        src = f"./logs/logs_{oldName}.txt"
+        dst = f"./logs/logs_{NewName}.txt"
 
-        with open("../logs1/logs_" + oldName + '.txt', 'r') as f_read:
-            with open("./logs/logs_" + NewName + '.txt', 'w') as f_write:
-                for i, line in enumerate(f_read): 
-                    if i == 0 :
-                        f_write.write(line)
-                    else:
-                        #it,alg,ratio,epsilon,numIt,alpha,ratioAdv,algTest,epsilonTest,numItTest,alphaTest,Error,Loss,testingTime,trainTime
-                        aux = line.split(",")
-                        iteration = aux[0]
-                        algTest = aux[7]
-                        eps_test = aux[8]
-                        num_iterTest = aux[9]
-                        alpha_test = aux[10]
-                        adv_err = aux[11]
-                        adv_loss = aux[12]
-                        advTestTime = aux[13]
-                        trainTime = aux[14]
-                        test_entropy = aux[15]
-                        test_MI = aux[16]
+        if not os.path.isfile(src):
+            print(f"[updateLogs] skip: missing {src}")
+            return
 
-                        if int(iteration) > epochMax: break
+        try:
+            epochMax = int(epochMax)
+        except Exception:
+            pass
 
-                        str_write = str(iteration) + "," + alg + "," + str(ratio) + "," + str(epsilon) + "," + str(numIt) + "," + str(alpha) + "," + str(ratioADV) + \
-                                        "," + algTest +"," + str(eps_test) + "," + str(num_iterTest) + "," + str(alpha_test) + "," + \
-                                        str(adv_err) + "," + str(adv_loss) + "," + str(advTestTime) + "," + str(trainTime) + "," + str(test_entropy) + "," + str(test_MI)    
-                        f_write.write(str_write)
+        with open(src, "r") as f_read, open(dst, "w") as f_write:
+            for i, line in enumerate(f_read):
+                if i == 0:
+                    f_write.write(line if line.endswith("\n") else line + "\n")
+                    continue
+
+                stripped = line.strip()
+                if not stripped:
+                    continue
+
+                aux = stripped.split(",")
+
+                try:
+                    iteration = int(aux[0])
+                except Exception:
+                    f_write.write(line if line.endswith("\n") else line + "\n")
+                    continue
+
+                if isinstance(epochMax, int) and iteration > epochMax:
+                    break
+
+                if len(aux) < 17:
+                    f_write.write(line if line.endswith("\n") else line + "\n")
+                    continue
+
+                algTest      = aux[7]
+                eps_test     = aux[8]
+                num_iterTest = aux[9]
+                alpha_test   = aux[10]
+                adv_err      = aux[11]
+                adv_loss     = aux[12]
+                advTestTime  = aux[13]
+                trainTime    = aux[14]
+                test_entropy = aux[15]
+                test_MI      = aux[16]
+
+                str_write = (
+                    f"{iteration},{alg},{ratio},{epsilon},{numIt},{alpha},{ratioADV},"
+                    f"{algTest},{eps_test},{num_iterTest},{alpha_test},"
+                    f"{adv_err},{adv_loss},{advTestTime},{trainTime},{test_entropy},{test_MI}\n"
+                )
+                f_write.write(str_write)
  
-
     def standard_train(self, model, modelName, loader, dataset, opt, iterations=10, ckptName=None, runName=None):
         '''training a standard model with checkpoint and saving the model.''' 
         if ckptName is None: ckptName = modelName
@@ -1265,7 +1292,8 @@ class trainModel():
             _model, _opt, trainTime, train_err, train_loss, counter = self.LoadModel(model, opt, model_name) # load model
             if _model is not None:
                 # if models exists, load logs
-                self.updateLogs(modelName, modelName, 'standard', 0, 0, 0, 0, 0, it)
+                if ckptName != runName:
+                    self.updateLogs(ckptName, runName, 'standard', 0, 0, 0, 0, 0, it)
                 t1 = time.time()-trainTime
                 model = _model
                 opt = _opt
