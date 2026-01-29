@@ -110,9 +110,6 @@ def entropy(output):
     # entropy of each prediction
     return entropy
 
-
-
-
 class Uncertainty(nn.Module):
     def __init__(self):
         super().__init__()
@@ -1130,6 +1127,27 @@ class trainModel():
 
         return
 
+    @torch.no_grad()
+    def compute_train_ce_err(self, train_loader, model):
+        was_training = model.training
+        model.eval()
+
+        total_loss = 0.0
+        total_err = 0.0
+        total_n = 0
+
+        for X, y in train_loader:
+            X, y = X.to(self.device), y.to(self.device)
+            logits = model(X)
+
+            total_loss += F.cross_entropy(logits, y, reduction="sum").item()
+            total_err  += (logits.argmax(dim=1) != y).sum().item()
+            total_n    += y.size(0)
+
+        if was_training:
+            model.train()
+
+        return total_loss / total_n, total_err / total_n
 
     def writeResult(self, filename, data):
         trainTime, train_err, train_loss = data[0]
@@ -1376,6 +1394,25 @@ class trainModel():
 
                     test_err, _, test_entropy, test_MI, _, _, _, _ = self.testModel_logs(dataset, modelName, epoch_counter+iterations, 'standard', 0 ,0, 0, 0, 0, time.time() - t1, write_pred_logs, num_samples=num_samples)
                     test_unc = test_entropy if UNCERTAINTY_MEASURE == 'PE' else test_MI
+
+                    # ---- log train metrics for stage2 ----
+                    global_epoch = epoch_counter + iterations   # 31..60
+                    ce_loss, ce_err = self.compute_train_ce_err(loader.train_loader, model)
+
+                    try:
+                        if wandb.run is not None:
+                            wandb.log({
+                                "train/loss": float(ce_loss),
+                                "train/err":  float(ce_err),
+                                "epoch": int(global_epoch),
+                                "lr": float(opt.param_groups[0]["lr"]),
+                                "stage": 2,
+                            }, step=int(global_epoch))
+                            print(f"[W&B] stage2 logged epoch={global_epoch} loss={ce_loss:.4f} err={ce_err:.4f}", flush=True)
+                    except Exception as e:
+                        print("[W&B log skipped]", e, flush=True)
+                    # --------------------------------------
+
                     counter_dataSize = 0
                     epoch_counter +=1
 
