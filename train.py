@@ -4110,13 +4110,36 @@ if __name__ == '__main__':
     _apply_stage2_from_args(args)
     print(f"[CFG] LOSS2 wrong={LOSS_2nd_stage_wrong}, correct={LOSS_2nd_stage_correct}, option={option_stage2}")
 
-    def init_wandb_if_needed(args):
-        project = os.environ.get("WANDB_PROJECT", "adam-euat")
-        entity  = os.environ.get("WANDB_ENTITY", None)
-        name    = os.environ.get("WANDB_NAME", None)
-        wandb.init(project=project, entity=entity, name=name, config=vars(args))
+def init_wandb_if_needed(args, default_name: str):
+    project = os.environ.get("WANDB_PROJECT", "ecg-loss")
+    entity  = os.environ.get("WANDB_ENTITY", None)
 
-    init_wandb_if_needed(args)
+    name = os.environ.get("WANDB_NAME", None) or default_name
+
+    group = os.environ.get("WANDB_GROUP", None) or f"{args.dataset}_seed{args.seed}_T{args.stop_val}"
+
+    # labels：sanity / official / method
+    tags_env = os.environ.get("WANDB_TAGS", "")
+    tags = [t.strip() for t in tags_env.split(",") if t.strip()]
+
+    # default tag
+    base_tags = {
+        args.dataset, f"seed{args.seed}", f"s1{args.stage1_epochs}", f"s2{args.stage2_epochs}",
+        f"loss2_{args.loss_stage2}", f"pe_{args.pe_mode}",
+    }
+    tags = sorted(set(tags) | base_tags)
+
+    job_type = os.environ.get("WANDB_JOB_TYPE", None)
+
+    wandb.init(
+        project=project,
+        entity=entity,
+        name=name,
+        group=group,
+        tags=tags,
+        job_type=job_type,
+        config=vars(args),
+    )
 
     # override PE mode from CLI
     PE_MODE = args.pe_mode
@@ -4199,16 +4222,20 @@ if __name__ == '__main__':
         print("config exists (no checkpointing is needed)")"""
 
     toRun = args.force_run or (not os.path.isfile("./logs/logs_" + modelName + ".txt"))
-    if toRun:
-        main(
-            modelName, dataset_name,
-            args.stop_val, args.stop,
-            args.stage1_epochs, args.stage2_epochs,
-            args.ecg_lam, args.ecg_tau, args.ecg_k, args.ecg_conf_type, args.ecg_detach_gates,
-            device, devices_id,
-            args.lr, args.momentum, args.batch,
-            args.lr_adv, args.momentum_adv, args.batch_adv,
-            args.half_prec, args.variants
-        )
-    else:
-        print("config exists (no checkpointing is needed)")        
+
+    if not toRun:
+        print("config exists (no checkpointing is needed)")
+        return
+
+    init_wandb_if_needed(args, default_name=modelName)
+
+    main(
+        modelName, dataset_name,
+        args.stop_val, args.stop,
+        args.stage1_epochs, args.stage2_epochs,
+        args.ecg_lam, args.ecg_tau, args.ecg_k, args.ecg_conf_type, args.ecg_detach_gates,
+        device, devices_id,
+        args.lr, args.momentum, args.batch,
+        args.lr_adv, args.momentum_adv, args.batch_adv,
+        args.half_prec, args.variants
+    )   
