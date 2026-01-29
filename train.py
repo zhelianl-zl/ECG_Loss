@@ -1236,8 +1236,10 @@ class trainModel():
                         f_write.write(str_write)
  
 
-    def standard_train(self, model, modelName, loader, dataset, opt, iterations=10):
+    def standard_train(self, model, modelName, loader, dataset, opt, iterations=10, ckptName=None, runName=None):
         '''training a standard model with checkpoint and saving the model.''' 
+        if ckptName is None: ckptName = modelName
+        if runName  is None: runName  = modelName
         if self.deep_ensemble:
             return self.standard_train_deep_ensemble(model, modelName, loader, dataset, opt, iterations)
         
@@ -1259,7 +1261,7 @@ class trainModel():
 
         
         for it in range(iterations, 0, -1):
-            model_name = modelName + "_epoch" + str(it)
+            model_name = ckptName + "_epoch" + str(it)
             _model, _opt, trainTime, train_err, train_loss, counter = self.LoadModel(model, opt, model_name) # load model
             if _model is not None:
                 # if models exists, load logs
@@ -1297,7 +1299,7 @@ class trainModel():
                 print("[W&B log skipped]", e, flush=True)
             # ==========================================
 
-            if counter % 5 == 0: 
+            if counter % 5 == 0 or counter == iterations:
                 print("saving model on epoch " + str(counter))
 
                 self.saveModel(True, {
@@ -1306,7 +1308,7 @@ class trainModel():
                     'training_time': time.time() - t1,
                     'error': train_err,
                     'loss': train_loss,
-                    'optimizer' : opt.state_dict(),}, modelName, counter)
+                    'optimizer' : opt.state_dict(),}, ckptName, counter)
 
 
         #opt = optim.Adam(model.parameters(), lr=lr/10.0)
@@ -1392,7 +1394,7 @@ class trainModel():
                 if counter_dataSize > epoch_dataSize:
                     if self.printTimes: t1_init = time.time()
 
-                    test_err, _, test_entropy, test_MI, _, _, _, _ = self.testModel_logs(dataset, modelName, epoch_counter+iterations, 'standard', 0 ,0, 0, 0, 0, time.time() - t1, write_pred_logs, num_samples=num_samples)
+                    test_err, _, test_entropy, test_MI, _, _, _, _ = self.testModel_logs(dataset, runName, epoch_counter+iterations, 'standard', 0 ,0, 0, 0, 0, time.time() - t1, write_pred_logs, num_samples=num_samples)
                     test_unc = test_entropy if UNCERTAINTY_MEASURE == 'PE' else test_MI
 
                     # ---- log train metrics for stage2 ----
@@ -1645,8 +1647,8 @@ class trainModel():
         '''training a standard model and then make it adversarial.'''
         
         if self.deep_ensemble:
-            return self.standard_pgd_train_deep_ensemble(model, modelName, loader, dataset, opt, iterations, epsilon=eps_train, num_iter=num_iterTrain, alpha=alpha_train)
-             
+            return self.standard_train_deep_ensemble(model, modelName, loader, dataset, opt, iterations,ckptName=ckptName, runName=runName)
+
         num_samples = 5
 
         #loading the model
@@ -1661,7 +1663,7 @@ class trainModel():
             model_name = modelName + "_epoch" + str(it) #str(iterations)
             _model, _opt, trainTime, train_err, train_loss, counter = self.LoadModel(model, opt, model_name)
             if _model is not None:
-                self.updateLogs(modelName, modelName, 'std_pgd', ratio, eps_train, num_iterTrain, alpha_train, ratio_adv, it) #iterations)
+                self.updateLogs(runName, runName, 'std_pgd', ratio, eps_train, num_iterTrain, alpha_train, ratio_adv, it) #iterations)
                 t1 = time.time()-trainTime
                 model = _model
                 opt = _opt
@@ -3808,10 +3810,12 @@ class model(trainModel):
         #    self.model = self.parallelizeModel(self.model)
 
 
-    def run(self, modelName, iterations=10, stop="epochs"):    
-        
+    def run(self, modelName, iterations=10, stop="epochs", ckptName=None, runName=None):
         self.model.train()
-        return self._train_epochs(modelName, iterations=iterations)
+        if ckptName is None: ckptName = modelName
+        if runName  is None: runName  = modelName
+        return self._train_epochs(modelName, iterations=iterations, ckptName=ckptName, runName=runName)
+
 
 
     def _train_epochs(self, modelName, iterations=10):
@@ -3871,7 +3875,8 @@ class model(trainModel):
 
         else:
             #train all model with checkpointing and early stopping (only used fo standard training to differentiate the full standard training and pre-training) 
-            trainTime, train_err, train_loss = self.standard_train(self.model, modelName, self.loader, _dataset, self.opt, iterations=iterations)
+            trainTime, train_err, train_loss = self.standard_train(self.model, runName, self.loader, _dataset, self.opt,
+                    iterations=iterations, ckptName=ckptName, runName=runName)
 
         return trainTime, train_err, train_loss
         
@@ -4015,7 +4020,7 @@ class model(trainModel):
         return model.to(self.device)
 
 
-def main(modelName, dataset_name, stop_val, stop,
+def main(ckptName, runName, dataset_name, stop_val, stop,
          stage1_epochs, stage2_epochs,
          ecg_lam, ecg_tau, ecg_k, ecg_conf_type, ecg_detach_gates,
          device, devices_id, lr, momentum, batch, lr_adv, momentum_adv, batch_adv,
@@ -4029,16 +4034,16 @@ def main(modelName, dataset_name, stop_val, stop,
     model_cnn.ecg_k = float(ecg_k)
     model_cnn.ecg_conf_type = str(ecg_conf_type)
     model_cnn.ecg_detach_gates = bool(ecg_detach_gates)
+    
     model_cnn.stage1_epochs = int(stage1_epochs)
     model_cnn.stage2_epochs = int(stage2_epochs)
-
     model_cnn.new_iterations = int(stage2_epochs)
 
     model_cnn.use_wandb = (wandb.run is not None)
     model_cnn.new_iterations = int(stage2_epochs)
 
-    trainTime, train_err, train_loss = model_cnn.run(modelName, iterations=int(stage1_epochs), stop=stop)
-
+    #trainTime, train_err, train_loss = model_cnn.run(modelName, iterations=int(stage1_epochs), stop=stop)
+    model_cnn.run(runName, iterations=int(stage1_epochs), stop=stop, ckptName=ckptName, runName=runName)
     return
 
 
@@ -4246,24 +4251,38 @@ if __name__ == "__main__":
     modelName += "_lr" + str(args.lr) + "_momentum" + str(args.momentum) + "_batch" + str(args.batch)
     modelName += "_lrAdv" + str(args.lr_adv) + "_momentumAdv" + str(args.momentum_adv) + "_batchAdv" + str(args.batch_adv)
     modelName += f"_pe{args.pe_mode}"
-    modelName += f"_s1{args.stage1_epochs}_{args.loss_stage1}"
-    modelName += f"_s2{args.loss_stage2}"
+
+    baseName  = modelName + f"_s1{args.stage1_epochs}_{args.loss_stage1}"
+    stage2Name = baseName + f"_s2{args.loss_stage2}"
+
     if args.loss_stage2.startswith("ecg"):
-        modelName += f"_lam{args.ecg_lam}_tau{args.ecg_tau}_k{args.ecg_k}_conf{args.ecg_conf_type}_dg{int(args.ecg_detach_gates)}"
+        stage2Name += f"_lam{args.ecg_lam}_tau{args.ecg_tau}_k{args.ecg_k}_conf{args.ecg_conf_type}_dg{int(args.ecg_detach_gates)}"
+
+    if args.variants == "cals":
+        baseName += "_cals"
+        stage2Name += "_cals"
+
+    if int(args.stage2_epochs) <= 0:
+        stage2Name = baseName
+
+    runName = stage2Name
 
     import torch, os, sys
     devices_id = [0]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    toRun = args.force_run or (not os.path.isfile("./logs/logs_" + modelName + ".txt"))
+    ckptName = baseName
+    runName  = stage2Name
+
+    toRun = args.force_run or (not os.path.isfile("./logs/logs_" + runName + ".txt"))
     if not toRun:
         print("config exists (no checkpointing is needed)")
         sys.exit(0)
 
-    init_wandb_if_needed(args, default_name=modelName)
+    init_wandb_if_needed(args, default_name=runName)
 
     main(
-        modelName, dataset_name,
+        ckptName, runName, dataset_name,
         args.stop_val, args.stop,
         args.stage1_epochs, args.stage2_epochs,
         args.ecg_lam, args.ecg_tau, args.ecg_k, args.ecg_conf_type, args.ecg_detach_gates,
