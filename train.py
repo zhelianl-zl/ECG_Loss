@@ -2232,7 +2232,7 @@ class trainModel():
 
             if getattr(self, "use_wandb", False):
                 import wandb
-                wandb.log(stats)
+                #wandb.log(stats)
 
             return loss
 
