@@ -1206,19 +1206,21 @@ class trainModel():
         return model, opt, training_time, train_err, train_loss, start_epoch
 
     def updateLogs(self, oldName, NewName, alg, ratio, epsilon, numIt, alpha, ratioADV, epochMax):
+        import os
         os.makedirs("./logs", exist_ok=True)
+        os.makedirs("./logs1", exist_ok=True)
 
-        src = f"./logs/logs_{oldName}.txt"
-        dst = f"./logs/logs_{NewName}.txt"
-
-        if not os.path.isfile(src):
-            print(f"[updateLogs] skip: missing {src}")
+        # Prefer ./logs, fallback ./logs1 (for older runs)
+        candidates = [
+            f"./logs/logs_{oldName}.txt",
+            f"./logs1/logs_{oldName}.txt",
+        ]
+        src = next((p for p in candidates if os.path.isfile(p)), None)
+        if src is None:
+            print(f"[updateLogs] skip: missing logs for {oldName} (./logs or ./logs1)")
             return
 
-        try:
-            epochMax = int(epochMax)
-        except Exception:
-            pass
+        dst = f"./logs/logs_{NewName}.txt"
 
         with open(src, "r") as f_read, open(dst, "w") as f_write:
             for i, line in enumerate(f_read):
@@ -1226,42 +1228,43 @@ class trainModel():
                     f_write.write(line if line.endswith("\n") else line + "\n")
                     continue
 
-                stripped = line.strip()
-                if not stripped:
+                raw = line.strip()
+                if not raw:
                     continue
 
-                aux = stripped.split(",")
-
+                aux = raw.split(",")
                 try:
-                    iteration = int(aux[0])
+                    it = int(aux[0])
                 except Exception:
-                    f_write.write(line if line.endswith("\n") else line + "\n")
+                    # If this line is malformed, keep it as-is
+                    f_write.write(raw + "\n")
                     continue
 
-                if isinstance(epochMax, int) and iteration > epochMax:
+                if it > int(epochMax):
                     break
 
-                if len(aux) < 17:
-                    f_write.write(line if line.endswith("\n") else line + "\n")
-                    continue
+                # If the line already contains full fields (>=17), rewrite with new alg/params; else keep line
+                if len(aux) >= 17:
+                    algTest = aux[7]
+                    eps_test = aux[8]
+                    num_iterTest = aux[9]
+                    alpha_test = aux[10]
+                    adv_err = aux[11]
+                    adv_loss = aux[12]
+                    advTestTime = aux[13]
+                    trainTime = aux[14]
+                    test_entropy = aux[15]
+                    test_MI = aux[16]
 
-                algTest      = aux[7]
-                eps_test     = aux[8]
-                num_iterTest = aux[9]
-                alpha_test   = aux[10]
-                adv_err      = aux[11]
-                adv_loss     = aux[12]
-                advTestTime  = aux[13]
-                trainTime    = aux[14]
-                test_entropy = aux[15]
-                test_MI      = aux[16]
+                    out = (
+                        f"{it},{alg},{ratio},{epsilon},{numIt},{alpha},{ratioADV},"
+                        f"{algTest},{eps_test},{num_iterTest},{alpha_test},"
+                        f"{adv_err},{adv_loss},{advTestTime},{trainTime},{test_entropy},{test_MI}\n"
+                    )
+                    f_write.write(out)
+                else:
+                    f_write.write(raw + "\n")
 
-                str_write = (
-                    f"{iteration},{alg},{ratio},{epsilon},{numIt},{alpha},{ratioADV},"
-                    f"{algTest},{eps_test},{num_iterTest},{alpha_test},"
-                    f"{adv_err},{adv_loss},{advTestTime},{trainTime},{test_entropy},{test_MI}\n"
-                )
-                f_write.write(str_write)
  
     def standard_train(self, model, modelName, loader, dataset, opt, iterations=10, ckptName=None, runName=None):
         '''training a standard model with checkpoint and saving the model.''' 
@@ -1298,6 +1301,20 @@ class trainModel():
                 model = _model
                 opt = _opt
                 counter += 1
+                # ===== W&B anchor: 补打一条 step=it（通常就是 30）=====
+                try:
+                    if wandb.run is not None:
+                        wandb.log({
+                            "train/loss": float(train_loss),
+                            "train/err":  float(train_err),
+                            "epoch": int(it),
+                            "stage": 1,
+                            "anchor": 1,
+                        }, step=int(it))
+                        print(f"[W&B] anchor logged at step={it}", flush=True)
+                except Exception as e:
+                    print("[W&B anchor skipped]", e, flush=True)
+                # =======================================================
                 break
         print("Standard training")
 
@@ -1315,13 +1332,14 @@ class trainModel():
             # ===== W&B: log once per epoch (step1) =====
             try:
                 if wandb.run is not None:
+                    global_step = int(counter)
                     wandb.log({
                         "train/loss": float(train_loss),
                         "train/err":  float(train_err),
                         "epoch": int(counter),
                         "lr": float(opt.param_groups[0]["lr"]),
                         "stage": 1,
-                    }, step=int(counter))
+                    }, step=global_step)
                     print(f"[W&B] logged epoch={counter} loss={float(train_loss):.4f} err={float(train_err):.4f}", flush=True)
             except Exception as e:
                 print("[W&B log skipped]", e, flush=True)
@@ -1426,7 +1444,7 @@ class trainModel():
                     test_unc = test_entropy if UNCERTAINTY_MEASURE == 'PE' else test_MI
 
                     # ---- log train metrics for stage2 ----
-                    global_epoch = epoch_counter + iterations   # 31..60
+                    global_step = epoch_counter + iterations   # 31..60
                     ce_loss, ce_err = self.compute_train_ce_err(loader.train_loader, model)
 
                     try:
@@ -1434,11 +1452,11 @@ class trainModel():
                             wandb.log({
                                 "train/loss": float(ce_loss),
                                 "train/err":  float(ce_err),
-                                "epoch": int(global_epoch),
+                                "epoch": int(global_step),
                                 "lr": float(opt.param_groups[0]["lr"]),
                                 "stage": 2,
-                            }, step=int(global_epoch))
-                            print(f"[W&B] stage2 logged epoch={global_epoch} loss={ce_loss:.4f} err={ce_err:.4f}", flush=True)
+                            }, step=int(global_step))
+                            print(f"[W&B] stage2 logged epoch={global_step} loss={ce_loss:.4f} err={ce_err:.4f}", flush=True)
                     except Exception as e:
                         print("[W&B log skipped]", e, flush=True)
                     # --------------------------------------
@@ -3116,6 +3134,7 @@ class trainModel():
         f.close()
         self.model.train() # go back to train mode
 
+        global_step = int(iteration)
         wandb.log({
             # STD
             "STD/Error": test_err,
@@ -3137,7 +3156,7 @@ class trainModel():
             "PGD/Corr": adv_extra["Corr"],
             "PGD/Wasserstein": adv_extra["Wasserstein"],
             "PGD/ECE": adv_extra["ECE"],
-        }, step=iteration)
+        }, step=global_step)
 
         return test_err, test_loss, test_entropy, test_MI, adv_err, adv_loss, adv_entropy, adv_MI
 
