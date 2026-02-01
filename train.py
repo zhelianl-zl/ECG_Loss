@@ -166,7 +166,6 @@ class Uncertainty(nn.Module):
         #loss = np.mean(entropy_vals) # should we calculate the average here ??
         return  loss
 
-
     def mutual_information_loss(self,model, X, y, num_samples=10, reduction='mean'):
         """Calculates the entropy loss of a probability distribution."""
         probs = None
