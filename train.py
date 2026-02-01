@@ -25,6 +25,8 @@ import pickle, time, random
 from PIL import Image
 import numpy as np
 import wandb
+import math
+from collections import deque
 
 #from math import log10, sqrt, log2, log
 
@@ -1126,183 +1128,183 @@ class trainModel():
 
         return
 
-# -------------------------------
-# ECG scheduling utilities
-# -------------------------------
-def configure_ecg_schedule(
-    self,
-    schedule: str = "none",
-    total_epochs: int = None,
-    lam_start: float = None,
-    lam_end: float = None,
-    tau_start: float = None,
-    tau_end: float = None,
-    k_start: float = None,
-    k_end: float = None,
-    adapt_warmup: int = 10,
-    adapt_window: int = 5,
-):
-    """Configure ECG parameter scheduling.
+    # -------------------------------
+    # ECG scheduling utilities
+    # -------------------------------
+    def configure_ecg_schedule(
+        self,
+        schedule: str = "none",
+        total_epochs: int = None,
+        lam_start: float = None,
+        lam_end: float = None,
+        tau_start: float = None,
+        tau_end: float = None,
+        k_start: float = None,
+        k_end: float = None,
+        adapt_warmup: int = 10,
+        adapt_window: int = 5,
+    ):
+        """Configure ECG parameter scheduling.
 
-    schedule:
-      - none: fixed (use --ecg_lam/--ecg_tau/--ecg_k)
-      - linear: linearly interpolate start->end over [1..total_epochs]
-      - cosine: cosine anneal start->end over [1..total_epochs]
-      - adaptive: adjust params online based on recent error trend
-    """
-    self.ecg_schedule = (schedule or "none").lower()
-    self.ecg_total_epochs = int(total_epochs) if total_epochs is not None else None
+        schedule:
+          - none: fixed (use --ecg_lam/--ecg_tau/--ecg_k)
+          - linear: linearly interpolate start->end over [1..total_epochs]
+          - cosine: cosine anneal start->end over [1..total_epochs]
+          - adaptive: adjust params online based on recent error trend
+        """
+        self.ecg_schedule = (schedule or "none").lower()
+        self.ecg_total_epochs = int(total_epochs) if total_epochs is not None else None
 
-    # Base values come from current config
-    self.ecg_lam_base = float(getattr(self, "ecg_lam", 1.0))
-    self.ecg_tau_base = float(getattr(self, "ecg_tau", 0.7))
-    self.ecg_k_base = float(getattr(self, "ecg_k", 10.0))
+        # Base values come from current config
+        self.ecg_lam_base = float(getattr(self, "ecg_lam", 1.0))
+        self.ecg_tau_base = float(getattr(self, "ecg_tau", 0.7))
+        self.ecg_k_base = float(getattr(self, "ecg_k", 10.0))
 
-    # Start/end defaults (if not provided, keep constant)
-    self.ecg_lam_start = self.ecg_lam_base if lam_start is None else float(lam_start)
-    self.ecg_lam_end = self.ecg_lam_base if lam_end is None else float(lam_end)
+        # Start/end defaults (if not provided, keep constant)
+        self.ecg_lam_start = self.ecg_lam_base if lam_start is None else float(lam_start)
+        self.ecg_lam_end = self.ecg_lam_base if lam_end is None else float(lam_end)
 
-    self.ecg_tau_start = self.ecg_tau_base if tau_start is None else float(tau_start)
-    self.ecg_tau_end = self.ecg_tau_base if tau_end is None else float(tau_end)
+        self.ecg_tau_start = self.ecg_tau_base if tau_start is None else float(tau_start)
+        self.ecg_tau_end = self.ecg_tau_base if tau_end is None else float(tau_end)
 
-    self.ecg_k_start = self.ecg_k_base if k_start is None else float(k_start)
-    self.ecg_k_end = self.ecg_k_base if k_end is None else float(k_end)
+        self.ecg_k_start = self.ecg_k_base if k_start is None else float(k_start)
+        self.ecg_k_end = self.ecg_k_base if k_end is None else float(k_end)
 
-    self.ecg_adapt_warmup = int(adapt_warmup)
-    self.ecg_adapt_window = max(1, int(adapt_window))
-    self._ecg_metric_window = deque(maxlen=self.ecg_adapt_window)
+        self.ecg_adapt_warmup = int(adapt_warmup)
+        self.ecg_adapt_window = max(1, int(adapt_window))
+        self._ecg_metric_window = deque(maxlen=self.ecg_adapt_window)
 
-    # Adaptive state (next-epoch params)
-    self._ecg_adapt_state = {
-        "lam": self.ecg_lam_base,
-        "tau": self.ecg_tau_base,
-        "k": self.ecg_k_base,
-    }
+        # Adaptive state (next-epoch params)
+        self._ecg_adapt_state = {
+            "lam": self.ecg_lam_base,
+            "tau": self.ecg_tau_base,
+            "k": self.ecg_k_base,
+        }
 
-    # Initialize visible params for scheduled modes
-    if self.ecg_schedule in ("linear", "cosine"):
-        self.ecg_lam = float(self.ecg_lam_start)
-        self.ecg_tau = float(self.ecg_tau_start)
-        self.ecg_k = float(self.ecg_k_start)
+        # Initialize visible params for scheduled modes
+        if self.ecg_schedule in ("linear", "cosine"):
+            self.ecg_lam = float(self.ecg_lam_start)
+            self.ecg_tau = float(self.ecg_tau_start)
+            self.ecg_k = float(self.ecg_k_start)
 
-    return
-
-def _ecg_schedule_progress(self, global_epoch: int) -> float:
-    if self.ecg_total_epochs is None or self.ecg_total_epochs <= 1:
-        return 1.0
-    t = (float(global_epoch) - 1.0) / float(self.ecg_total_epochs - 1)
-    if t < 0.0:
-        return 0.0
-    if t > 1.0:
-        return 1.0
-    return float(t)
-
-def _ecg_interp(self, start: float, end: float, t: float) -> float:
-    return float(start + t * (end - start))
-
-def _ecg_cosine(self, start: float, end: float, t: float) -> float:
-    # start at t=0, end at t=1
-    return float(end + 0.5 * (start - end) * (1.0 + math.cos(math.pi * t)))
-
-def _ecg_on_epoch_begin(self, global_epoch: int):
-    """Apply ECG scheduling before the epoch starts."""
-    sched = getattr(self, "ecg_schedule", "none")
-    if sched in (None, "none", "fixed"):
         return
 
-    if sched in ("linear", "cosine"):
-        t = self._ecg_schedule_progress(global_epoch)
-        if sched == "linear":
-            self.ecg_lam = self._ecg_interp(self.ecg_lam_start, self.ecg_lam_end, t)
-            self.ecg_tau = self._ecg_interp(self.ecg_tau_start, self.ecg_tau_end, t)
-            self.ecg_k = self._ecg_interp(self.ecg_k_start, self.ecg_k_end, t)
-        else:
-            self.ecg_lam = self._ecg_cosine(self.ecg_lam_start, self.ecg_lam_end, t)
-            self.ecg_tau = self._ecg_cosine(self.ecg_tau_start, self.ecg_tau_end, t)
-            self.ecg_k = self._ecg_cosine(self.ecg_k_start, self.ecg_k_end, t)
+    def _ecg_schedule_progress(self, global_epoch: int) -> float:
+        if self.ecg_total_epochs is None or self.ecg_total_epochs <= 1:
+            return 1.0
+        t = (float(global_epoch) - 1.0) / float(self.ecg_total_epochs - 1)
+        if t < 0.0:
+            return 0.0
+        if t > 1.0:
+            return 1.0
+        return float(t)
 
-    elif sched == "adaptive":
-        st = getattr(self, "_ecg_adapt_state", None)
-        if st is not None:
-            self.ecg_lam = float(st["lam"])
-            self.ecg_tau = float(st["tau"])
-            self.ecg_k = float(st["k"])
+    def _ecg_interp(self, start: float, end: float, t: float) -> float:
+        return float(start + t * (end - start))
 
-    # Log current schedule values once per epoch (if wandb active)
-    try:
-        if wandb.run is not None:
-            wandb.log(
-                {
-                    "ECG/lam": float(getattr(self, "ecg_lam", 0.0)),
-                    "ECG/tau": float(getattr(self, "ecg_tau", 0.0)),
-                    "ECG/k": float(getattr(self, "ecg_k", 0.0)),
-                    "ECG/schedule_progress": float(self._ecg_schedule_progress(global_epoch)),
-                    "ECG/schedule": str(sched),
-                },
-                step=int(global_epoch),
-            )
-    except Exception:
-        pass
+    def _ecg_cosine(self, start: float, end: float, t: float) -> float:
+        # start at t=0, end at t=1
+        return float(end + 0.5 * (start - end) * (1.0 + math.cos(math.pi * t)))
 
-    return
+    def _ecg_on_epoch_begin(self, global_epoch: int):
+        """Apply ECG scheduling before the epoch starts."""
+        sched = getattr(self, "ecg_schedule", "none")
+        if sched in (None, "none", "fixed"):
+            return
 
-def _ecg_on_epoch_end(self, global_epoch: int, metric: float = None):
-    """Update adaptive ECG schedule after the epoch ends.
+        if sched in ("linear", "cosine"):
+            t = self._ecg_schedule_progress(global_epoch)
+            if sched == "linear":
+                self.ecg_lam = self._ecg_interp(self.ecg_lam_start, self.ecg_lam_end, t)
+                self.ecg_tau = self._ecg_interp(self.ecg_tau_start, self.ecg_tau_end, t)
+                self.ecg_k = self._ecg_interp(self.ecg_k_start, self.ecg_k_end, t)
+            else:
+                self.ecg_lam = self._ecg_cosine(self.ecg_lam_start, self.ecg_lam_end, t)
+                self.ecg_tau = self._ecg_cosine(self.ecg_tau_start, self.ecg_tau_end, t)
+                self.ecg_k = self._ecg_cosine(self.ecg_k_start, self.ecg_k_end, t)
 
-    metric: use test error (lower is better).
-    """
-    if getattr(self, "ecg_schedule", "none") != "adaptive":
-        return
-    if metric is None:
-        return
+        elif sched == "adaptive":
+            st = getattr(self, "_ecg_adapt_state", None)
+            if st is not None:
+                self.ecg_lam = float(st["lam"])
+                self.ecg_tau = float(st["tau"])
+                self.ecg_k = float(st["k"])
 
-    try:
-        m = float(metric)
-    except Exception:
-        return
+        # Log current schedule values once per epoch (if wandb active)
+        try:
+            if wandb.run is not None:
+                wandb.log(
+                    {
+                        "ECG/lam": float(getattr(self, "ecg_lam", 0.0)),
+                        "ECG/tau": float(getattr(self, "ecg_tau", 0.0)),
+                        "ECG/k": float(getattr(self, "ecg_k", 0.0)),
+                        "ECG/schedule_progress": float(self._ecg_schedule_progress(global_epoch)),
+                        "ECG/schedule": str(sched),
+                    },
+                    step=int(global_epoch),
+                )
+        except Exception:
+            pass
 
-    self._ecg_metric_window.append(m)
-
-    # Warmup: do not adapt
-    if int(global_epoch) <= int(getattr(self, "ecg_adapt_warmup", 0)):
-        return
-    if len(self._ecg_metric_window) < int(getattr(self, "ecg_adapt_window", 1)):
-        return
-
-    # Trend over the window
-    delta = float(self._ecg_metric_window[-1] - self._ecg_metric_window[0])
-
-    # Small deadzone
-    if abs(delta) < 1e-4:
         return
 
-    # If error worsens (delta>0): strengthen ECG; else relax a bit.
-    direction = 1.0 if delta > 0.0 else -1.0
+    def _ecg_on_epoch_end(self, global_epoch: int, metric: float = None):
+        """Update adaptive ECG schedule after the epoch ends.
 
-    lam_step = 0.05 * max(1.0, abs(float(getattr(self, "ecg_lam_base", 1.0))))
-    tau_step = 0.01
-    k_step = 0.5
+        metric: use test error (lower is better).
+        """
+        if getattr(self, "ecg_schedule", "none") != "adaptive":
+            return
+        if metric is None:
+            return
 
-    st = self._ecg_adapt_state
-    st["lam"] = float(min(max(st["lam"] + direction * lam_step, 0.0), 5.0))
-    st["tau"] = float(min(max(st["tau"] - direction * tau_step, 0.0), 0.99))
-    st["k"] = float(min(max(st["k"] + direction * k_step, 0.1), 100.0))
+        try:
+            m = float(metric)
+        except Exception:
+            return
 
-    try:
-        if wandb.run is not None:
-            wandb.log(
-                {
-                    "ECG/adapt_delta_err": float(delta),
-                    "ECG/adapt_next_lam": float(st["lam"]),
-                    "ECG/adapt_next_tau": float(st["tau"]),
-                    "ECG/adapt_next_k": float(st["k"]),
-                },
-                step=int(global_epoch),
-            )
-    except Exception:
-        pass
+        self._ecg_metric_window.append(m)
 
-    return
+        # Warmup: do not adapt
+        if int(global_epoch) <= int(getattr(self, "ecg_adapt_warmup", 0)):
+            return
+        if len(self._ecg_metric_window) < int(getattr(self, "ecg_adapt_window", 1)):
+            return
+
+        # Trend over the window
+        delta = float(self._ecg_metric_window[-1] - self._ecg_metric_window[0])
+
+        # Small deadzone
+        if abs(delta) < 1e-4:
+            return
+
+        # If error worsens (delta>0): strengthen ECG; else relax a bit.
+        direction = 1.0 if delta > 0.0 else -1.0
+
+        lam_step = 0.05 * max(1.0, abs(float(getattr(self, "ecg_lam_base", 1.0))))
+        tau_step = 0.01
+        k_step = 0.5
+
+        st = self._ecg_adapt_state
+        st["lam"] = float(min(max(st["lam"] + direction * lam_step, 0.0), 5.0))
+        st["tau"] = float(min(max(st["tau"] - direction * tau_step, 0.0), 0.99))
+        st["k"] = float(min(max(st["k"] + direction * k_step, 0.1), 100.0))
+
+        try:
+            if wandb.run is not None:
+                wandb.log(
+                    {
+                        "ECG/adapt_delta_err": float(delta),
+                        "ECG/adapt_next_lam": float(st["lam"]),
+                        "ECG/adapt_next_tau": float(st["tau"]),
+                        "ECG/adapt_next_k": float(st["k"]),
+                    },
+                    step=int(global_epoch),
+                )
+        except Exception:
+            pass
+
+        return
 
     @torch.no_grad()
     def compute_train_ce_err(self, train_loader, model):
