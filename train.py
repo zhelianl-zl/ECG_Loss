@@ -1126,6 +1126,184 @@ class trainModel():
 
         return
 
+# -------------------------------
+# ECG scheduling utilities
+# -------------------------------
+def configure_ecg_schedule(
+    self,
+    schedule: str = "none",
+    total_epochs: int = None,
+    lam_start: float = None,
+    lam_end: float = None,
+    tau_start: float = None,
+    tau_end: float = None,
+    k_start: float = None,
+    k_end: float = None,
+    adapt_warmup: int = 10,
+    adapt_window: int = 5,
+):
+    """Configure ECG parameter scheduling.
+
+    schedule:
+      - none: fixed (use --ecg_lam/--ecg_tau/--ecg_k)
+      - linear: linearly interpolate start->end over [1..total_epochs]
+      - cosine: cosine anneal start->end over [1..total_epochs]
+      - adaptive: adjust params online based on recent error trend
+    """
+    self.ecg_schedule = (schedule or "none").lower()
+    self.ecg_total_epochs = int(total_epochs) if total_epochs is not None else None
+
+    # Base values come from current config
+    self.ecg_lam_base = float(getattr(self, "ecg_lam", 1.0))
+    self.ecg_tau_base = float(getattr(self, "ecg_tau", 0.7))
+    self.ecg_k_base = float(getattr(self, "ecg_k", 10.0))
+
+    # Start/end defaults (if not provided, keep constant)
+    self.ecg_lam_start = self.ecg_lam_base if lam_start is None else float(lam_start)
+    self.ecg_lam_end = self.ecg_lam_base if lam_end is None else float(lam_end)
+
+    self.ecg_tau_start = self.ecg_tau_base if tau_start is None else float(tau_start)
+    self.ecg_tau_end = self.ecg_tau_base if tau_end is None else float(tau_end)
+
+    self.ecg_k_start = self.ecg_k_base if k_start is None else float(k_start)
+    self.ecg_k_end = self.ecg_k_base if k_end is None else float(k_end)
+
+    self.ecg_adapt_warmup = int(adapt_warmup)
+    self.ecg_adapt_window = max(1, int(adapt_window))
+    self._ecg_metric_window = deque(maxlen=self.ecg_adapt_window)
+
+    # Adaptive state (next-epoch params)
+    self._ecg_adapt_state = {
+        "lam": self.ecg_lam_base,
+        "tau": self.ecg_tau_base,
+        "k": self.ecg_k_base,
+    }
+
+    # Initialize visible params for scheduled modes
+    if self.ecg_schedule in ("linear", "cosine"):
+        self.ecg_lam = float(self.ecg_lam_start)
+        self.ecg_tau = float(self.ecg_tau_start)
+        self.ecg_k = float(self.ecg_k_start)
+
+    return
+
+def _ecg_schedule_progress(self, global_epoch: int) -> float:
+    if self.ecg_total_epochs is None or self.ecg_total_epochs <= 1:
+        return 1.0
+    t = (float(global_epoch) - 1.0) / float(self.ecg_total_epochs - 1)
+    if t < 0.0:
+        return 0.0
+    if t > 1.0:
+        return 1.0
+    return float(t)
+
+def _ecg_interp(self, start: float, end: float, t: float) -> float:
+    return float(start + t * (end - start))
+
+def _ecg_cosine(self, start: float, end: float, t: float) -> float:
+    # start at t=0, end at t=1
+    return float(end + 0.5 * (start - end) * (1.0 + math.cos(math.pi * t)))
+
+def _ecg_on_epoch_begin(self, global_epoch: int):
+    """Apply ECG scheduling before the epoch starts."""
+    sched = getattr(self, "ecg_schedule", "none")
+    if sched in (None, "none", "fixed"):
+        return
+
+    if sched in ("linear", "cosine"):
+        t = self._ecg_schedule_progress(global_epoch)
+        if sched == "linear":
+            self.ecg_lam = self._ecg_interp(self.ecg_lam_start, self.ecg_lam_end, t)
+            self.ecg_tau = self._ecg_interp(self.ecg_tau_start, self.ecg_tau_end, t)
+            self.ecg_k = self._ecg_interp(self.ecg_k_start, self.ecg_k_end, t)
+        else:
+            self.ecg_lam = self._ecg_cosine(self.ecg_lam_start, self.ecg_lam_end, t)
+            self.ecg_tau = self._ecg_cosine(self.ecg_tau_start, self.ecg_tau_end, t)
+            self.ecg_k = self._ecg_cosine(self.ecg_k_start, self.ecg_k_end, t)
+
+    elif sched == "adaptive":
+        st = getattr(self, "_ecg_adapt_state", None)
+        if st is not None:
+            self.ecg_lam = float(st["lam"])
+            self.ecg_tau = float(st["tau"])
+            self.ecg_k = float(st["k"])
+
+    # Log current schedule values once per epoch (if wandb active)
+    try:
+        if wandb.run is not None:
+            wandb.log(
+                {
+                    "ECG/lam": float(getattr(self, "ecg_lam", 0.0)),
+                    "ECG/tau": float(getattr(self, "ecg_tau", 0.0)),
+                    "ECG/k": float(getattr(self, "ecg_k", 0.0)),
+                    "ECG/schedule_progress": float(self._ecg_schedule_progress(global_epoch)),
+                    "ECG/schedule": str(sched),
+                },
+                step=int(global_epoch),
+            )
+    except Exception:
+        pass
+
+    return
+
+def _ecg_on_epoch_end(self, global_epoch: int, metric: float = None):
+    """Update adaptive ECG schedule after the epoch ends.
+
+    metric: use test error (lower is better).
+    """
+    if getattr(self, "ecg_schedule", "none") != "adaptive":
+        return
+    if metric is None:
+        return
+
+    try:
+        m = float(metric)
+    except Exception:
+        return
+
+    self._ecg_metric_window.append(m)
+
+    # Warmup: do not adapt
+    if int(global_epoch) <= int(getattr(self, "ecg_adapt_warmup", 0)):
+        return
+    if len(self._ecg_metric_window) < int(getattr(self, "ecg_adapt_window", 1)):
+        return
+
+    # Trend over the window
+    delta = float(self._ecg_metric_window[-1] - self._ecg_metric_window[0])
+
+    # Small deadzone
+    if abs(delta) < 1e-4:
+        return
+
+    # If error worsens (delta>0): strengthen ECG; else relax a bit.
+    direction = 1.0 if delta > 0.0 else -1.0
+
+    lam_step = 0.05 * max(1.0, abs(float(getattr(self, "ecg_lam_base", 1.0))))
+    tau_step = 0.01
+    k_step = 0.5
+
+    st = self._ecg_adapt_state
+    st["lam"] = float(min(max(st["lam"] + direction * lam_step, 0.0), 5.0))
+    st["tau"] = float(min(max(st["tau"] - direction * tau_step, 0.0), 0.99))
+    st["k"] = float(min(max(st["k"] + direction * k_step, 0.1), 100.0))
+
+    try:
+        if wandb.run is not None:
+            wandb.log(
+                {
+                    "ECG/adapt_delta_err": float(delta),
+                    "ECG/adapt_next_lam": float(st["lam"]),
+                    "ECG/adapt_next_tau": float(st["tau"]),
+                    "ECG/adapt_next_k": float(st["k"]),
+                },
+                step=int(global_epoch),
+            )
+    except Exception:
+        pass
+
+    return
+
     @torch.no_grad()
     def compute_train_ce_err(self, train_loader, model):
         was_training = model.training
@@ -1325,8 +1503,11 @@ class trainModel():
             if counter == iterations: write_pred_logs = True
             print("epoch number " + str(counter))
 
+            self._ecg_on_epoch_begin(counter)
+
             train_err, train_loss, misclassified_ids = self.epoch(loader.train_loader, model, opt, num_samples=num_samples, lagrangian=lagrangian)
-            self.testModel_logs(dataset, modelName, counter, 'standard', 0 ,0, 0, 0, 0, time.time() - t1, write_pred_logs, num_samples=num_samples)
+            test_err, _, _, _, _, _, _, _ = self.testModel_logs(dataset, modelName, counter, 'standard', 0 ,0, 0, 0, 0, time.time() - t1, write_pred_logs, num_samples=num_samples)
+            self._ecg_on_epoch_end(counter, metric=test_err)
 
             # ===== W&B: log once per epoch (step1) =====
             try:
@@ -1408,6 +1589,12 @@ class trainModel():
 
             print("epoch number " + str(epoch_counter+iterations) + " and epoch size of " + str(epoch_dataSize))
             while epoch_counter < max_stage2_epochs+1:
+
+                global_epoch = epoch_counter + iterations
+
+                if counter_dataSize == 0 and counter_repeat == 0:
+
+                    self._ecg_on_epoch_begin(global_epoch)
                 if self.printTimes: t1_init = time.time()
                 if counter_repeat==0:
                     _, _, misclassified_ids = self.epoch(loader.train_loader, model) #test with training data
@@ -1444,6 +1631,7 @@ class trainModel():
 
                     # ---- log train metrics for stage2 ----
                     global_step = epoch_counter + iterations   # 31..60
+                    self._ecg_on_epoch_end(global_step, metric=test_err)
                     ce_loss, ce_err = self.compute_train_ce_err(loader.train_loader, model)
 
                     try:
@@ -4075,6 +4263,7 @@ class model(trainModel):
 def main(ckptName, runName, dataset_name, stop_val, stop,
          stage1_epochs, stage2_epochs,
          ecg_lam, ecg_tau, ecg_k, ecg_conf_type, ecg_detach_gates,
+         ecg_schedule, ecg_lam_start, ecg_lam_end, ecg_tau_start, ecg_tau_end, ecg_k_start, ecg_k_end, ecg_adapt_warmup, ecg_adapt_window,
          device, devices_id, lr, momentum, batch, lr_adv, momentum_adv, batch_adv,
          half_prec=False, variants='none'):
     
@@ -4086,6 +4275,23 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
     model_cnn.ecg_k = float(ecg_k)
     model_cnn.ecg_conf_type = str(ecg_conf_type)
     model_cnn.ecg_detach_gates = bool(ecg_detach_gates)
+    # ECG schedule (full training)
+    try:
+        total_epochs = int(stage1_epochs) + int(stage2_epochs)
+    except Exception:
+        total_epochs = None
+    model_cnn.configure_ecg_schedule(
+        schedule=ecg_schedule,
+        total_epochs=total_epochs,
+        lam_start=ecg_lam_start,
+        lam_end=ecg_lam_end,
+        tau_start=ecg_tau_start,
+        tau_end=ecg_tau_end,
+        k_start=ecg_k_start,
+        k_end=ecg_k_end,
+        adapt_warmup=ecg_adapt_warmup,
+        adapt_window=ecg_adapt_window,
+    )
     
     model_cnn.stage1_epochs = int(stage1_epochs)
     model_cnn.stage2_epochs = int(stage2_epochs)
@@ -4188,6 +4394,16 @@ if __name__ == '__main__':
     parser.add_argument("--ecg_k", type=float, default=10.0)
     parser.add_argument("--ecg_conf_type", type=str, default="pmax", choices=["pmax", "1-pe", "none"])
     parser.add_argument("--ecg_detach_gates", type=str2bool, default=True)
+    parser.add_argument("--ecg_schedule", type=str, default="none", choices=["none", "linear", "cosine", "adaptive"])
+    parser.add_argument("--ecg_lam_start", type=float, default=None)
+    parser.add_argument("--ecg_lam_end", type=float, default=None)
+    parser.add_argument("--ecg_tau_start", type=float, default=None)
+    parser.add_argument("--ecg_tau_end", type=float, default=None)
+    parser.add_argument("--ecg_k_start", type=float, default=None)
+    parser.add_argument("--ecg_k_end", type=float, default=None)
+
+    parser.add_argument("--ecg_adapt_warmup", type=int, default=10)
+    parser.add_argument("--ecg_adapt_window", type=int, default=5)
 
     parser.add_argument("--force_run", action="store_true")
 
@@ -4328,8 +4544,22 @@ if __name__ == "__main__":
     baseName  = modelName + f"_s1{args.stage1_epochs}_{args.loss_stage1}"
     stage2Name = baseName + f"_s2{args.loss_stage2}"
 
-    if args.loss_stage2.startswith("ecg"):
-        stage2Name += f"_lam{args.ecg_lam}_tau{args.ecg_tau}_k{args.ecg_k}_conf{args.ecg_conf_type}_dg{int(args.ecg_detach_gates)}"
+if (args.loss_stage1 == "ecg") or args.loss_stage2.startswith("ecg"):
+    stage2Name += f"_conf{args.ecg_conf_type}_dg{int(args.ecg_detach_gates)}"
+    if args.ecg_schedule != "none":
+        stage2Name += f"_sched{args.ecg_schedule}"
+        if args.ecg_schedule in ["linear", "cosine"]:
+            lam_s = args.ecg_lam_start if args.ecg_lam_start is not None else args.ecg_lam
+            lam_e = args.ecg_lam_end if args.ecg_lam_end is not None else args.ecg_lam
+            tau_s = args.ecg_tau_start if args.ecg_tau_start is not None else args.ecg_tau
+            tau_e = args.ecg_tau_end if args.ecg_tau_end is not None else args.ecg_tau
+            k_s = args.ecg_k_start if args.ecg_k_start is not None else args.ecg_k
+            k_e = args.ecg_k_end if args.ecg_k_end is not None else args.ecg_k
+            stage2Name += f"_lam{lam_s}-{lam_e}_tau{tau_s}-{tau_e}_k{k_s}-{k_e}"
+        elif args.ecg_schedule == "adaptive":
+            stage2Name += f"_warm{args.ecg_adapt_warmup}_win{args.ecg_adapt_window}_baseLam{args.ecg_lam}_baseTau{args.ecg_tau}_baseK{args.ecg_k}"
+    else:
+        stage2Name += f"_lam{args.ecg_lam}_tau{args.ecg_tau}_k{args.ecg_k}"
 
     if args.variants == "cals":
         baseName += "_cals"
@@ -4359,6 +4589,7 @@ if __name__ == "__main__":
         args.stop_val, args.stop,
         args.stage1_epochs, args.stage2_epochs,
         args.ecg_lam, args.ecg_tau, args.ecg_k, args.ecg_conf_type, args.ecg_detach_gates,
+        args.ecg_schedule, args.ecg_lam_start, args.ecg_lam_end, args.ecg_tau_start, args.ecg_tau_end, args.ecg_k_start, args.ecg_k_end, args.ecg_adapt_warmup, args.ecg_adapt_window,
         device, devices_id,
         args.lr, args.momentum, args.batch,
         args.lr_adv, args.momentum_adv, args.batch_adv,
