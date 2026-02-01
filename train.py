@@ -1405,7 +1405,7 @@ class trainModel():
             counter_repeat = 0
             half_batch_size=int(loader.batch_size/2)
 
-            max_stage2_epochs = min(self.new_iterations, iterations) 
+            max_stage2_epochs = int(self.new_iterations) 
 
             print("epoch number " + str(epoch_counter+iterations) + " and epoch size of " + str(epoch_dataSize))
             while epoch_counter < max_stage2_epochs+1:
@@ -4090,6 +4090,8 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
     
     model_cnn.stage1_epochs = int(stage1_epochs)
     model_cnn.stage2_epochs = int(stage2_epochs)
+    # Ensure stage-1 uses the selected loss (CE by default, ECG if --loss_stage1=ecg/--full_ecg)
+    model_cnn.LossInUse = LOSS_1st_stage
     model_cnn.new_iterations = int(stage2_epochs)
 
     model_cnn.use_wandb = (wandb.run is not None)
@@ -4161,12 +4163,17 @@ if __name__ == '__main__':
     # ---- 2-stage loss control (CE pretrain -> method finetune) ----
     parser.add_argument("--stage1_epochs", type=int, default=30)
     parser.add_argument("--stage2_epochs", type=int, default=30)
-
     parser.add_argument(
         "--loss_stage1",
         type=str,
         default="ce",
-        choices=["ce"],
+        choices=["ce", "ecg"],
+    )
+
+    parser.add_argument(
+        "--full_ecg",
+        action="store_true",
+        help="Run ECG from epoch 1 to stop_val (sets stage1_epochs=stop_val, stage2_epochs=0, loss_stage1=ecg).",
     )
 
     parser.add_argument(
@@ -4288,6 +4295,20 @@ def init_wandb_if_needed(args, default_name: str):
 
 if __name__ == "__main__":
     args = parser.parse_args()
+
+    # Convenience: run ECG for the whole training
+    if getattr(args, "full_ecg", False):
+        args.loss_stage1 = "ecg"
+        args.stage1_epochs = int(args.stop_val)
+        args.stage2_epochs = 0
+
+    # Apply stage-1 loss selection
+    if args.loss_stage1 == "ce":
+        LOSS_1st_stage = LOSS_MIN_CROSSENT
+    elif args.loss_stage1 == "ecg":
+        LOSS_1st_stage = LOSS_ECG
+    else:
+        raise ValueError(f"Unknown --loss_stage1: {args.loss_stage1}")
 
     _apply_stage2_from_args(args)
     print(f"[CFG] LOSS2 wrong={LOSS_2nd_stage_wrong}, correct={LOSS_2nd_stage_correct}, option={option_stage2}")
