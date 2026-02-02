@@ -1631,6 +1631,21 @@ class trainModel():
                     test_err, _, test_entropy, test_MI, _, _, _, _ = self.testModel_logs(dataset, runName, epoch_counter+iterations, 'standard', 0 ,0, 0, 0, 0, time.time() - t1, write_pred_logs, num_samples=num_samples)
                     test_unc = test_entropy if UNCERTAINTY_MEASURE == 'PE' else test_MI
 
+                    # ===== SAVE CKPT in STAGE2 (every 5 global epochs + last) =====
+                    last_global_epoch = iterations + max_stage2_epochs   # e.g. 30 + 30 = 60
+                    if global_epoch == last_global_epoch: # if (global_epoch % 5 == 0) or (global_epoch == last_global_epoch):
+                        print(f"[STAGE2] saving model on epoch {global_epoch}", flush=True)
+                        self.saveModel(True, {
+                            'epoch': global_epoch,
+                            'state_dict': model.state_dict(),
+                            'training_time': time.time() - t1,
+                            # 这里 stage2 没有 train_err/train_loss 的同名变量，建议存 CE 的 train 统计或存 test_err
+                            'error': float(test_err),     # 先存 test_err 也行
+                            'loss':  float(ce_loss) if 'ce_loss' in locals() else 0.0,
+                            'optimizer': opt.state_dict(),
+                        }, ckptName, global_epoch)
+                    # =============================================================
+
                     # ---- log train metrics for stage2 ----
                     global_step = epoch_counter + iterations   # 31..60
                     self._ecg_on_epoch_end(global_step, metric=test_err)
