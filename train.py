@@ -1633,7 +1633,7 @@ class trainModel():
 
                     # ===== SAVE CKPT in STAGE2 (every 5 global epochs + last) =====
                     last_global_epoch = iterations + max_stage2_epochs   # e.g. 30 + 30 = 60
-                    if global_epoch == last_global_epoch: # if (global_epoch % 5 == 0) or (global_epoch == last_global_epoch):
+                    if (global_epoch % 5 == 0) or (global_epoch == last_global_epoch):
                         print(f"[STAGE2] saving model on epoch {global_epoch}", flush=True)
                         self.saveModel(True, {
                             'epoch': global_epoch,
@@ -4447,7 +4447,7 @@ if __name__ == '__main__':
     print(f"[CFG] LOSS2 wrong={LOSS_2nd_stage_wrong}, correct={LOSS_2nd_stage_correct}, option={option_stage2}")
 
 def init_wandb_if_needed(args, default_name: str):
-    project = os.environ.get("WANDB_PROJECT", "ecg-loss")
+    project = os.environ.get("WANDB_PROJECT", "ecg-loss-2")
     entity  = os.environ.get("WANDB_ENTITY", None)
 
     name = os.environ.get("WANDB_NAME", None) or default_name
@@ -4561,22 +4561,22 @@ if __name__ == "__main__":
     baseName  = modelName + f"_s1{args.stage1_epochs}_{args.loss_stage1}"
     stage2Name = baseName + f"_s2{args.loss_stage2}"
 
-if (args.loss_stage1 == "ecg") or args.loss_stage2.startswith("ecg"):
-    stage2Name += f"_conf{args.ecg_conf_type}_dg{int(args.ecg_detach_gates)}"
-    if args.ecg_schedule != "none":
-        stage2Name += f"_sched{args.ecg_schedule}"
-        if args.ecg_schedule in ["linear", "cosine"]:
-            lam_s = args.ecg_lam_start if args.ecg_lam_start is not None else args.ecg_lam
-            lam_e = args.ecg_lam_end if args.ecg_lam_end is not None else args.ecg_lam
-            tau_s = args.ecg_tau_start if args.ecg_tau_start is not None else args.ecg_tau
-            tau_e = args.ecg_tau_end if args.ecg_tau_end is not None else args.ecg_tau
-            k_s = args.ecg_k_start if args.ecg_k_start is not None else args.ecg_k
-            k_e = args.ecg_k_end if args.ecg_k_end is not None else args.ecg_k
-            stage2Name += f"_lam{lam_s}-{lam_e}_tau{tau_s}-{tau_e}_k{k_s}-{k_e}"
-        elif args.ecg_schedule == "adaptive":
-            stage2Name += f"_warm{args.ecg_adapt_warmup}_win{args.ecg_adapt_window}_baseLam{args.ecg_lam}_baseTau{args.ecg_tau}_baseK{args.ecg_k}"
-    else:
-        stage2Name += f"_lam{args.ecg_lam}_tau{args.ecg_tau}_k{args.ecg_k}"
+    if (args.loss_stage1 == "ecg") or args.loss_stage2.startswith("ecg"):
+        stage2Name += f"_conf{args.ecg_conf_type}_dg{int(args.ecg_detach_gates)}"
+        if args.ecg_schedule != "none":
+            stage2Name += f"_sched{args.ecg_schedule}"
+            if args.ecg_schedule in ["linear", "cosine"]:
+                lam_s = args.ecg_lam_start if args.ecg_lam_start is not None else args.ecg_lam
+                lam_e = args.ecg_lam_end if args.ecg_lam_end is not None else args.ecg_lam
+                tau_s = args.ecg_tau_start if args.ecg_tau_start is not None else args.ecg_tau
+                tau_e = args.ecg_tau_end if args.ecg_tau_end is not None else args.ecg_tau
+                k_s = args.ecg_k_start if args.ecg_k_start is not None else args.ecg_k
+                k_e = args.ecg_k_end if args.ecg_k_end is not None else args.ecg_k
+                stage2Name += f"_lam{lam_s}-{lam_e}_tau{tau_s}-{tau_e}_k{k_s}-{k_e}"
+            elif args.ecg_schedule == "adaptive":
+                stage2Name += f"_warm{args.ecg_adapt_warmup}_win{args.ecg_adapt_window}_baseLam{args.ecg_lam}_baseTau{args.ecg_tau}_baseK{args.ecg_k}"
+        else:
+            stage2Name += f"_lam{args.ecg_lam}_tau{args.ecg_tau}_k{args.ecg_k}"
 
     if args.variants == "cals":
         baseName += "_cals"
