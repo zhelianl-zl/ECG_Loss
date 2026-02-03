@@ -1135,6 +1135,7 @@ class trainModel():
         self,
         schedule: str = "none",
         total_epochs: int = None,
+        epoch_offset: int = 0,
         lam_start: float = None,
         lam_end: float = None,
         tau_start: float = None,
@@ -1154,6 +1155,9 @@ class trainModel():
         """
         self.ecg_schedule = (schedule or "none").lower()
         self.ecg_total_epochs = int(total_epochs) if total_epochs is not None else None
+
+        # Align schedule to a stage boundary if needed (e.g., start at stage-2 epoch 1)
+        self.ecg_epoch_offset = int(epoch_offset)
 
         # Base values come from current config
         self.ecg_lam_base = float(getattr(self, "ecg_lam", 1.0))
@@ -1192,7 +1196,10 @@ class trainModel():
     def _ecg_schedule_progress(self, global_epoch: int) -> float:
         if self.ecg_total_epochs is None or self.ecg_total_epochs <= 1:
             return 1.0
-        t = (float(global_epoch) - 1.0) / float(self.ecg_total_epochs - 1)
+        # If ECG is only used in stage-2, subtract stage-1 epochs so schedule starts at t=0
+        offset = int(getattr(self, "ecg_epoch_offset", 0))
+        e = float(global_epoch) - float(offset)
+        t = (e - 1.0) / float(self.ecg_total_epochs - 1)
         if t < 0.0:
             return 0.0
         if t > 1.0:
@@ -4292,14 +4299,35 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
     model_cnn.ecg_k = float(ecg_k)
     model_cnn.ecg_conf_type = str(ecg_conf_type)
     model_cnn.ecg_detach_gates = bool(ecg_detach_gates)
-    # ECG schedule (full training)
+
+    # ECG schedule alignment
+    # If ECG is only enabled in stage-2 (e.g., CE -> ECG), we want schedule to start at stage-2 epoch 1.
     try:
-        total_epochs = int(stage1_epochs) + int(stage2_epochs)
+        _s1 = int(stage1_epochs)
+        _s2 = int(stage2_epochs)
     except Exception:
-        total_epochs = None
+        _s1, _s2 = 0, 0
+
+    # Detect whether ECG is used in stage-1 / stage-2 based on configured loss modes
+    try:
+        _s1_is_ecg = (LOSS_1st_stage == LOSS_ECG)
+    except Exception:
+        _s1_is_ecg = False
+    _s2_is_ecg = (LOSS_2nd_stage_wrong == LOSS_ECG) or (LOSS_2nd_stage_correct == LOSS_ECG)
+
+    if (_s2_is_ecg and (not _s1_is_ecg) and _s2 > 0):
+        # schedule over stage-2 only
+        total_epochs = _s2
+        epoch_offset = _s1
+    else:
+        # schedule over full training (or ECG also used in stage-1)
+        total_epochs = _s1 + _s2 if (_s1 + _s2) > 0 else None
+        epoch_offset = 0
+
     model_cnn.configure_ecg_schedule(
         schedule=ecg_schedule,
         total_epochs=total_epochs,
+        epoch_offset=epoch_offset,
         lam_start=ecg_lam_start,
         lam_end=ecg_lam_end,
         tau_start=ecg_tau_start,
@@ -4447,7 +4475,7 @@ if __name__ == '__main__':
     print(f"[CFG] LOSS2 wrong={LOSS_2nd_stage_wrong}, correct={LOSS_2nd_stage_correct}, option={option_stage2}")
 
 def init_wandb_if_needed(args, default_name: str):
-    project = "ecg_ImageNet" #os.environ.get("WANDB_PROJECT", "ecg_binary_fast")
+    project = "ecg_ImageNet-32" #os.environ.get("WANDB_PROJECT", "ecg_binary_fast")
     entity  = os.environ.get("WANDB_ENTITY", None)
 
     name = os.environ.get("WANDB_NAME", None) or default_name
@@ -4495,7 +4523,7 @@ def set_seed(seed: int):
 
 def init_wandb_if_needed(args, default_name: str):
     import os, wandb
-    project = "ecg_ImageNet" #os.environ.get("WANDB_PROJECT", "ecg_binary_fast")
+    project = "ecg_ImageNet-32" #os.environ.get("WANDB_PROJECT", "ecg_binary_fast")
     entity  = os.environ.get("WANDB_ENTITY", None)
     name    = os.environ.get("WANDB_NAME", None) or default_name
     group   = os.environ.get("WANDB_GROUP", None) or f"{args.dataset}_seed{args.seed}_T{args.stop_val}"
