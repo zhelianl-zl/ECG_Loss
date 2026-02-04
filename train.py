@@ -4561,7 +4561,7 @@ if __name__ == '__main__':
     print(f"[CFG] LOSS2 wrong={LOSS_2nd_stage_wrong}, correct={LOSS_2nd_stage_correct}, option={option_stage2}")
 
 def init_wandb_if_needed(args, default_name: str):
-    project = "ecg_ImageNet-32" #os.environ.get("WANDB_PROJECT", "ecg_binary_fast")
+    project = "ecg_ImageNet-224" #os.environ.get("WANDB_PROJECT", "ecg_binary_fast")
     entity  = os.environ.get("WANDB_ENTITY", None)
 
     name = os.environ.get("WANDB_NAME", None) or default_name
@@ -4609,7 +4609,7 @@ def set_seed(seed: int):
 
 def init_wandb_if_needed(args, default_name: str):
     import os, wandb
-    project = "ecg_ImageNet-32" #os.environ.get("WANDB_PROJECT", "ecg_binary_fast")
+    project = "ecg_ImageNet-224" #os.environ.get("WANDB_PROJECT", "ecg_binary_fast")
     entity  = os.environ.get("WANDB_ENTITY", None)
     name    = os.environ.get("WANDB_NAME", None) or default_name
     group   = os.environ.get("WANDB_GROUP", None) or f"{args.dataset}_seed{args.seed}_T{args.stop_val}"
