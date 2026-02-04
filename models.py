@@ -168,8 +168,8 @@ class ResNet(nn.Module):
         x = self.layer4(x)
         if self.dropout_rate > 0: x = self.dropout(x)
 
-        x = F.avg_pool2d(x, 4)
-        x = x.view(x.size(0), -1)
+        x = F.adaptive_avg_pool2d(x, (1, 1))
+        x = x.view(x.size(0), -1)   # 或 torch.flatten(x, 1)
         x = self.fc(x)
         return x
 
