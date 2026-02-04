@@ -1028,7 +1028,7 @@ class dataset():
                 print("Downsampled dataset")
                 root_dir = '../data/imageNet/'
 
-                resolution=32 
+                resolution=64 
                 classes=1000
                 
                 normalize = transforms.Normalize(mean=[0.4810,0.4574,0.4078], std=[0.2146,0.2104,0.2138])
