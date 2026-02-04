@@ -1640,7 +1640,7 @@ class trainModel():
 
                     # ===== SAVE CKPT in STAGE2 (every 5 global epochs + last) =====
                     last_global_epoch = iterations + max_stage2_epochs   # e.g. 30 + 30 = 60
-                    if (global_epoch % 5 == 0) or (global_epoch == last_global_epoch):
+                    if global_epoch == last_global_epoch:# if (global_epoch % 5 == 0) or (global_epoch == last_global_epoch):
                         print(f"[STAGE2] saving model on epoch {global_epoch}", flush=True)
                         self.saveModel(True, {
                             'epoch': global_epoch,
