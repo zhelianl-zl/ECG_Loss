@@ -54,6 +54,8 @@ def ecg_loss(logits, targets, lam=1.0, tau=0.7, k=10.0, conf_type="pmax", detach
         "gate_mean": gate.mean().item(),
         "wrong_mean": wrong_gate.mean().item(),
         "conf_mean": conf.mean().item(),
+        "conf_gate_mean": conf_gate.mean().item(),
+        "conf_gate_active_frac": (conf_gate > 0.5).float().mean().item(),
         "scale_mean": scale.mean().item(),
         "ce_mean": ce.mean().item(),
     }
