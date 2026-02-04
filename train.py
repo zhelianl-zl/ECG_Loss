@@ -48,7 +48,7 @@ PE_RMS_EPS = 1e-8
 Normalize_entropy = (PE_MODE != "raw")
 USE_PE_RMS = (PE_MODE == "logk_rms")
 
-imageNet_original = False
+imageNet_original = True
 
 torch.manual_seed(0)
 
@@ -1019,6 +1019,7 @@ class dataset():
                     ]))
 
                 self.data_test = datasets.ImageFolder(valdir, transforms.Compose([
+                        transforms.Resize(256),
                         transforms.CenterCrop(crop_size),
                         transforms.ToTensor(),normalize,
                     ]))
@@ -1040,8 +1041,8 @@ class dataset():
 
             self.data_val = self.data_test
 
-            self.train_loader = DataLoader(self.data_train, batch_size = batch_size, shuffle=False, pin_memory=True,) if batch_size > 0 else None
-            self.trainAvd_loader = DataLoader(self.data_train, batch_size = batch_size_adv, shuffle=False, pin_memory=True,) if batch_size_adv > 0 else None
+            self.train_loader = DataLoader(self.data_train, batch_size = batch_size, shuffle=True, pin_memory=True,) if batch_size > 0 else None
+            self.trainAvd_loader = DataLoader(self.data_train, batch_size = batch_size_adv, shuffle=True, pin_memory=True,) if batch_size_adv > 0 else None
             self.test_loader = DataLoader(self.data_test, batch_size = batch_size_test, shuffle=False, pin_memory=True,)
             #self.val_loader = self.test_loader
 
@@ -1208,7 +1209,6 @@ class trainModel():
 
     def _ecg_on_epoch_begin(self, global_epoch: int):
         """Apply ECG scheduling before the epoch starts."""
-        self._ecg_current_epoch = int(global_epoch)
         sched = getattr(self, "ecg_schedule", "none")
         if sched in (None, "none", "fixed"):
             return
@@ -2468,7 +2468,6 @@ class trainModel():
 
 
     def LossFunction(self, model, X, y, y_pred, num_samples=5, CrossEntropyFunction=False):
-        self._ecg_last_stats = None  # for ECG gate diagnostics
         # LOSS_MIN_CROSSENT = 0 # minimize cross entropy loss
         # LOSS_MIN_CROSSENT_UNC  = 1 # minimize cross_entropy_loss + uncertainty
         # LOSS_MIN_CROSSENT_MAX_UNC = 2 # minimize cross_entropy_loss - uncertainty = minimize cross_entropy_loss + maximize uncertainty 
@@ -2483,8 +2482,6 @@ class trainModel():
                 conf_type=self.ecg_conf_type,
                 detach_gates=getattr(self, "ecg_detach_gates", True)
             )
-
-            self._ecg_last_stats = stats
 
             if getattr(self, "use_wandb", False):
                 import wandb
@@ -2517,10 +2514,6 @@ class trainModel():
         total_loss, total_err = 0.,0.
         misclassified_ids = []
 
-        # --- ECG gate diagnostics (sample-weighted mean over the epoch) ---
-        _ecg_sum = {}
-        _ecg_n = 0
-
         for ct, (X,y) in enumerate(loader):
             X,y = X.to(self.device), y.to(self.device) # len of bacth size
             if self.half_prec: 
@@ -2532,21 +2525,6 @@ class trainModel():
                 if opt:   # backpropagation
                     with torch.cuda.amp.autocast(dtype=torch.float16):
                         loss = self.LossFunction(model, X, y, y_pred, num_samples=num_samples)
-
-
-                        # accumulate ECG stats for this batch (if using ECG loss)
-
-                        _stats = getattr(self, "_ecg_last_stats", None)
-
-                        if _stats is not None:
-
-                            bs = int(X.shape[0])
-
-                            for k, v in _stats.items():
-
-                                _ecg_sum[k] = _ecg_sum.get(k, 0.0) + float(v) * bs
-
-                            _ecg_n += bs
 
                     opt.zero_grad()
 
@@ -2567,28 +2545,6 @@ class trainModel():
                     opt.zero_grad()
 
                     loss = self.LossFunction(model, X, y, y_pred, num_samples=num_samples)
-
-
-
-                    # accumulate ECG stats for this batch (if using ECG loss)
-
-
-                    _stats = getattr(self, "_ecg_last_stats", None)
-
-
-                    if _stats is not None:
-
-
-                        bs = int(X.shape[0])
-
-
-                        for k, v in _stats.items():
-
-
-                            _ecg_sum[k] = _ecg_sum.get(k, 0.0) + float(v) * bs
-
-
-                        _ecg_n += bs
                     if lagrangian is not None:
                         penalty, constraint = lagrangian.get(y_pred)
                         (loss + penalty).backward()
@@ -2608,17 +2564,6 @@ class trainModel():
 
             del X, y, misclassified, batch_misclassified_ids
             torch.cuda.empty_cache()
-
-        # log ECG gate diagnostics once per epoch (sample-weighted)
-        if _ecg_n > 0:
-            try:
-                import wandb
-                step = getattr(self, "_ecg_current_epoch", None)
-                if wandb.run is not None and step is not None:
-                    wandb.log({f"ECG/{k}": (_ecg_sum[k] / _ecg_n) for k in _ecg_sum}, step=int(step))
-                    wandb.log({"ECG/n": int(_ecg_n)}, step=int(step))
-            except Exception as e:
-                print("[W&B ECG stats skipped]", e, flush=True)
 
 
         return total_err / len(loader.dataset), total_loss / len(loader.dataset), misclassified_ids
@@ -2651,13 +2596,8 @@ class trainModel():
         elif Adaptive_Balancing:
             weight_loss1 = 1-weight_loss
             weight_loss2 = weight_loss
-        # --- ECG gate diagnostics (sample-weighted means over this stage2 epoch) ---
-        _ecg_sum_all = {}
-        _ecg_n_all = 0
-        _ecg_sum_wrong = {}
-        _ecg_n_wrong = 0
-        _ecg_sum_correct = {}
-        _ecg_n_correct = 0
+
+
 
         for ct in range(no_batches):
 
@@ -2679,27 +2619,9 @@ class trainModel():
                         self.LossInUse = LOSS_2nd_stage_wrong
                         loss_wrong = self.LossFunction(model, X_wrong, y_wrong, y_pred_wrong, num_samples=num_samples)
 
-                        # accumulate ECG stats (wrong batch) if using ECG loss
-                        _stats = getattr(self, "_ecg_last_stats", None)
-                        if _stats is not None:
-                            bs = int(X_wrong.shape[0])
-                            for k, v in _stats.items():
-                                _ecg_sum_wrong[k] = _ecg_sum_wrong.get(k, 0.0) + float(v) * bs
-                                _ecg_sum_all[k] = _ecg_sum_all.get(k, 0.0) + float(v) * bs
-                            _ecg_n_wrong += bs
-                            _ecg_n_all += bs
                         self.LossInUse = LOSS_2nd_stage_correct
                         loss_correct = self.LossFunction(model, X_correct, y_correct, y_pred_correct, num_samples=num_samples)
 
-                        # accumulate ECG stats (correct batch) if using ECG loss
-                        _stats = getattr(self, "_ecg_last_stats", None)
-                        if _stats is not None:
-                            bs = int(X_correct.shape[0])
-                            for k, v in _stats.items():
-                                _ecg_sum_correct[k] = _ecg_sum_correct.get(k, 0.0) + float(v) * bs
-                                _ecg_sum_all[k] = _ecg_sum_all.get(k, 0.0) + float(v) * bs
-                            _ecg_n_correct += bs
-                            _ecg_n_all += bs
                         # Calculate the total loss with dynamic weights
                         if Weighted_Sum or Adaptive_Balancing or dynamic_weights:
                             loss = weight_loss1 * loss_wrong + weight_loss2 * loss_correct
@@ -2725,32 +2647,12 @@ class trainModel():
                 if opt:  # backpropagation
                     self.LossInUse = LOSS_2nd_stage_wrong
                     loss_wrong = self.LossFunction(model, X_wrong, y_wrong, y_pred_wrong, num_samples=num_samples)
-
-                    # accumulate ECG stats (wrong batch) if using ECG loss
-                    _stats = getattr(self, "_ecg_last_stats", None)
-                    if _stats is not None:
-                        bs = int(X_wrong.shape[0])
-                        for k, v in _stats.items():
-                            _ecg_sum_wrong[k] = _ecg_sum_wrong.get(k, 0.0) + float(v) * bs
-                            _ecg_sum_all[k] = _ecg_sum_all.get(k, 0.0) + float(v) * bs
-                        _ecg_n_wrong += bs
-                        _ecg_n_all += bs
                     if prints:
                         print(self.LossInUse)
                         print(loss_wrong)
 
                     self.LossInUse = LOSS_2nd_stage_correct 
                     loss_correct = self.LossFunction(model, X_correct, y_correct, y_pred_correct, num_samples=num_samples)
-
-                    # accumulate ECG stats (correct batch) if using ECG loss
-                    _stats = getattr(self, "_ecg_last_stats", None)
-                    if _stats is not None:
-                        bs = int(X_correct.shape[0])
-                        for k, v in _stats.items():
-                            _ecg_sum_correct[k] = _ecg_sum_correct.get(k, 0.0) + float(v) * bs
-                            _ecg_sum_all[k] = _ecg_sum_all.get(k, 0.0) + float(v) * bs
-                        _ecg_n_correct += bs
-                        _ecg_n_all += bs
                     if prints:
                         print(self.LossInUse)
                         print(loss_correct)
@@ -2784,24 +2686,9 @@ class trainModel():
                     loss.backward()
                     opt.step()
                     if dynamic_weights: weight_optimizer.step()
-        # log ECG gate diagnostics once per epoch (sample-weighted)
-        if _ecg_n_all > 0:
-            try:
-                import wandb
-                step = getattr(self, "_ecg_current_epoch", None)
-                if wandb.run is not None and step is not None:
-                    wandb.log({f"ECG/all/{k}": (_ecg_sum_all[k] / _ecg_n_all) for k in _ecg_sum_all}, step=int(step))
-                    wandb.log({"ECG/all/n": int(_ecg_n_all)}, step=int(step))
-                    if _ecg_n_wrong > 0:
-                        wandb.log({f"ECG/wrong/{k}": (_ecg_sum_wrong[k] / _ecg_n_wrong) for k in _ecg_sum_wrong}, step=int(step))
-                        wandb.log({"ECG/wrong/n": int(_ecg_n_wrong)}, step=int(step))
-                    if _ecg_n_correct > 0:
-                        wandb.log({f"ECG/correct/{k}": (_ecg_sum_correct[k] / _ecg_n_correct) for k in _ecg_sum_correct}, step=int(step))
-                        wandb.log({"ECG/correct/n": int(_ecg_n_correct)}, step=int(step))
-            except Exception as e:
-                print("[W&B ECG stats skipped]", e, flush=True)
-
+                        
         return #total_err /datasetSize, total_loss/datasetSize, misclassified_ids
+
 
     def epoch_adversarial(self, loader, model, attack, dataset, epsilon=0.1, num_iter=20, alpha=0.01, ratio=1, opt=None, num_samples=5, **kwargs):
         """Adversarial training/evaluation epoch over the dataset"""
