@@ -48,7 +48,7 @@ PE_RMS_EPS = 1e-8
 Normalize_entropy = (PE_MODE != "raw")
 USE_PE_RMS = (PE_MODE == "logk_rms")
 
-imageNet_original = True
+imageNet_original = False
 
 torch.manual_seed(0)
 
