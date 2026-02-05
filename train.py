@@ -889,9 +889,38 @@ class dataset():
             self.data_val = self.data_test
 
 
-            self.train_loader = DataLoader(self.data_train, batch_size = batch_size, shuffle=False) if batch_size > 0 else None
-            self.trainAvd_loader = DataLoader(self.data_train, batch_size = batch_size_adv, shuffle=False) if batch_size_adv > 0 else None
-            self.test_loader = DataLoader(self.data_test, batch_size = batch_size_test, shuffle=False)
+            # ---- DataLoader performance knobs (ImageNet) ----
+            DL_WORKERS = int(os.environ.get("DL_WORKERS", "8"))  # try 4/8/16 on Colab
+            DL_WORKERS = max(DL_WORKERS, 0)
+
+            DL_KW = dict(
+                pin_memory=True,
+                num_workers=DL_WORKERS,
+                persistent_workers=(DL_WORKERS > 0),
+            )
+            if DL_WORKERS > 0:
+                DL_KW["prefetch_factor"] = 2
+
+            self.train_loader = DataLoader(
+                self.data_train,
+                batch_size=batch_size,
+                shuffle=True,
+                **DL_KW,
+            ) if batch_size > 0 else None
+
+            self.trainAvd_loader = DataLoader(
+                self.data_train,
+                batch_size=batch_size_adv,
+                shuffle=True,
+                **DL_KW,
+            ) if batch_size_adv > 0 else None
+
+            self.test_loader = DataLoader(
+                self.data_test,
+                batch_size=batch_size_test,
+                shuffle=False,
+                **DL_KW,
+            )
             #self.val_loader = self.test_loader
 
 
@@ -1084,10 +1113,30 @@ class dataset():
 
 
     def update_trainLoader(self):
-        self.train_loader = DataLoader(self.data_train, batch_size = self.batch_size, shuffle=False, pin_memory=True,) if self.batch_size > 0 else None
-        self.trainAvd_loader = DataLoader(self.data_train, batch_size = self.batch_size_adv, shuffle=False, pin_memory=True,) if self.batch_size_adv > 0 else None
+        DL_WORKERS = int(os.environ.get("DL_WORKERS", "8"))
+        DL_WORKERS = max(DL_WORKERS, 0)
+        DL_KW = dict(
+            pin_memory=True,
+            num_workers=DL_WORKERS,
+            persistent_workers=(DL_WORKERS > 0),
+        )
+        if DL_WORKERS > 0:
+            DL_KW["prefetch_factor"] = 2
 
+        # keep shuffle=False here because code later relies on stable ordering/IDs
+        self.train_loader = DataLoader(
+            self.data_train,
+            batch_size=self.batch_size,
+            shuffle=False,
+            **DL_KW,
+        ) if self.batch_size > 0 else None
 
+        self.trainAvd_loader = DataLoader(
+            self.data_train,
+            batch_size=self.batch_size_adv,
+            shuffle=False,
+            **DL_KW,
+        ) if self.batch_size_adv > 0 else None
 class trainModel():
     def __init__(self, device, half_prec=False, variants=None):
         self.device = device
