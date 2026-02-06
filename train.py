@@ -1258,6 +1258,11 @@ class trainModel():
 
     def _ecg_on_epoch_begin(self, global_epoch: int):
         """Apply ECG scheduling before the epoch starts."""
+
+        # --- ECG stats (epoch-level): reset accumulator ---
+        self._ecg_stat_sum = {}
+        self._ecg_stat_n = 0
+
         sched = getattr(self, "ecg_schedule", "none")
         if sched in (None, "none", "fixed"):
             return
@@ -1303,6 +1308,16 @@ class trainModel():
 
         metric: use test error (lower is better).
         """
+
+        # --- ECG stats (epoch-level): log averaged gate stats ---
+        try:
+            if wandb.run is not None and getattr(self, "_ecg_stat_n", 0) > 0:
+                avg = {f"ECG/{k}": (v / float(self._ecg_stat_n)) for k, v in getattr(self, "_ecg_stat_sum", {}).items()}
+                if avg:
+                    wandb.log(avg, step=int(global_epoch))
+        except Exception:
+            pass
+
         if getattr(self, "ecg_schedule", "none") != "adaptive":
             return
         if metric is None:
@@ -2533,8 +2548,25 @@ class trainModel():
             )
 
             if getattr(self, "use_wandb", False):
-                import wandb
-                #wandb.log(stats)
+                # Accumulate ECG gate stats (avoid per-batch wandb spam)
+                try:
+                    if wandb.run is not None:
+                        if not hasattr(self, "_ecg_stat_sum"):
+                            self._ecg_stat_sum = {}
+                            self._ecg_stat_n = 0
+                        self._ecg_stat_n += 1
+                        for _k, _v in stats.items():
+                            try:
+                                _fv = float(_v)
+                            except Exception:
+                                # torch tensors
+                                try:
+                                    _fv = float(_v.detach().cpu().item())
+                                except Exception:
+                                    continue
+                            self._ecg_stat_sum[_k] = self._ecg_stat_sum.get(_k, 0.0) + _fv
+                except Exception:
+                    pass
 
             return loss
 
