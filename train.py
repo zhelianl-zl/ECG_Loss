@@ -1386,7 +1386,25 @@ class trainModel():
                                 )
                         except Exception:
                             pass
+            
+            # Also allow lam/k to follow the configured start->end schedule while tau is controlled.
+            try:
+                if getattr(self, "ecg_total_epochs", None) is not None:
+                    t = self._ecg_schedule_progress(int(global_epoch))
+                    # linear interpolate lam and k if start/end provided (or base values)
+                    lam_new = (1.0 - t) * float(getattr(self, "ecg_lam_start", getattr(self, "ecg_lam", 0.0))) + t * float(getattr(self, "ecg_lam_end", getattr(self, "ecg_lam", 0.0)))
+                    k_new   = (1.0 - t) * float(getattr(self, "ecg_k_start", getattr(self, "ecg_k", 0.0)))   + t * float(getattr(self, "ecg_k_end", getattr(self, "ecg_k", 0.0)))
+                    self.ecg_lam = float(lam_new)
+                    self.ecg_k = float(k_new)
+                    # log
+                    try:
+                        if wandb.run is not None:
+                            wandb.log({"ECG/lam_after": float(self.ecg_lam), "ECG/k_after": float(self.ecg_k)}, step=int(global_epoch))
+                    except Exception:
+                        pass
             except Exception:
+                pass
+except Exception:
                 pass
             return
 
