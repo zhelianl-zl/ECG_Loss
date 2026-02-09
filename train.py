@@ -1192,6 +1192,13 @@ class trainModel():
         k_start: float = None,
         k_end: float = None,
         adapt_warmup: int = 10,
+        # Scheme C (tau_target): control tau to keep active gate fraction near a target
+        tau_target: float = 0.6,
+        tau_lr: float = 0.10,
+        tau_ema: float = 0.90,
+        tau_deadzone: float = 0.02,
+        tau_min: float = 0.0,
+        tau_max: float = 0.99,
         adapt_window: int = 5,
     ):
         """Configure ECG parameter scheduling.
@@ -1201,9 +1208,18 @@ class trainModel():
           - linear: linearly interpolate start->end over [1..total_epochs]
           - cosine: cosine anneal start->end over [1..total_epochs]
           - adaptive: adjust params online based on recent error trend
+          - tau_target: adjust tau online to keep gate active fraction near a target (Scheme C)
         """
         self.ecg_schedule = (schedule or "none").lower()
         self.ecg_total_epochs = int(total_epochs) if total_epochs is not None else None
+        # --- Scheme C: tau_target controller params (used when ecg_schedule == 'tau_target') ---
+        self.ecg_tau_target = float(tau_target)
+        self.ecg_tau_lr = float(tau_lr)
+        self.ecg_tau_ema = float(tau_ema)
+        self.ecg_tau_deadzone = float(tau_deadzone)
+        self.ecg_tau_min = float(tau_min)
+        self.ecg_tau_max = float(tau_max)
+        self._ecg_tau_target_ema_state = None
 
         # Base values come from current config
         self.ecg_lam_base = float(getattr(self, "ecg_lam", 1.0))
@@ -1318,8 +1334,65 @@ class trainModel():
         except Exception:
             pass
 
-        if getattr(self, "ecg_schedule", "none") != "adaptive":
+        sched = getattr(self, "ecg_schedule", "none")
+
+        # --- Scheme C: tau_target controller (does not need metric) ---
+        if sched == "tau_target":
+            try:
+                n = int(getattr(self, "_ecg_stat_n", 0))
+                if n > 0:
+                    s = getattr(self, "_ecg_stat_sum", {}) or {}
+                    if "conf_gate_active_frac" in s:
+                        active = float(s["conf_gate_active_frac"]) / float(n)
+
+                        # optional EMA smoothing
+                        beta = float(getattr(self, "ecg_tau_ema", 0.0))
+                        if beta > 0.0:
+                            prev = getattr(self, "_ecg_tau_target_ema_state", None)
+                            if prev is None:
+                                ema = active
+                            else:
+                                ema = beta * float(prev) + (1.0 - beta) * active
+                            self._ecg_tau_target_ema_state = float(ema)
+                            active_used = float(ema)
+                        else:
+                            active_used = float(active)
+
+                        target = float(getattr(self, "ecg_tau_target", 0.6))
+                        err = active_used - target
+
+                        deadzone = float(getattr(self, "ecg_tau_deadzone", 0.0))
+                        if abs(err) >= deadzone:
+                            tau = float(getattr(self, "ecg_tau", getattr(self, "ecg_tau_base", 0.7)))
+                            lr = float(getattr(self, "ecg_tau_lr", 0.1))
+                            tau_new = tau + lr * err
+                            tau_min = float(getattr(self, "ecg_tau_min", 0.0))
+                            tau_max = float(getattr(self, "ecg_tau_max", 0.99))
+                            tau_new = float(min(max(tau_new, tau_min), tau_max))
+                            self.ecg_tau = tau_new
+
+                        # log controller behavior
+                        try:
+                            if wandb.run is not None:
+                                wandb.log(
+                                    {
+                                        "ECG/tau_target_active_frac": float(active_used),
+                                        "ECG/tau_target_raw_active_frac": float(active),
+                                        "ECG/tau_target": float(target),
+                                        "ECG/tau_target_err": float(err),
+                                        "ECG/tau_after": float(getattr(self, "ecg_tau", 0.0)),
+                                    },
+                                    step=int(global_epoch),
+                                )
+                        except Exception:
+                            pass
+            except Exception:
+                pass
             return
+
+        if sched != "adaptive":
+            return
+
         if metric is None:
             return
 
@@ -2550,21 +2623,20 @@ class trainModel():
             if getattr(self, "use_wandb", False):
                 # Accumulate ECG gate stats (avoid per-batch wandb spam)
                 try:
-                    if wandb.run is not None:
-                        if not hasattr(self, "_ecg_stat_sum"):
-                            self._ecg_stat_sum = {}
-                            self._ecg_stat_n = 0
-                        self._ecg_stat_n += 1
-                        for _k, _v in stats.items():
+                    if not hasattr(self, "_ecg_stat_sum"):
+                        self._ecg_stat_sum = {}
+                        self._ecg_stat_n = 0
+                    self._ecg_stat_n += 1
+                    for _k, _v in stats.items():
+                        try:
+                            _fv = float(_v)
+                        except Exception:
+                            # torch tensors
                             try:
-                                _fv = float(_v)
+                                _fv = float(_v.detach().cpu().item())
                             except Exception:
-                                # torch tensors
-                                try:
-                                    _fv = float(_v.detach().cpu().item())
-                                except Exception:
-                                    continue
-                            self._ecg_stat_sum[_k] = self._ecg_stat_sum.get(_k, 0.0) + _fv
+                                continue
+                        self._ecg_stat_sum[_k] = self._ecg_stat_sum.get(_k, 0.0) + _fv
                 except Exception:
                     pass
 
@@ -4363,6 +4435,7 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
          stage1_epochs, stage2_epochs,
          ecg_lam, ecg_tau, ecg_k, ecg_conf_type, ecg_detach_gates,
          ecg_schedule, ecg_lam_start, ecg_lam_end, ecg_tau_start, ecg_tau_end, ecg_k_start, ecg_k_end, ecg_adapt_warmup, ecg_adapt_window,
+         ecg_tau_target, ecg_tau_lr, ecg_tau_ema, ecg_tau_deadzone, ecg_tau_min, ecg_tau_max,
          device, devices_id, lr, momentum, batch, lr_adv, momentum_adv, batch_adv,
          half_prec=False, variants='none'):
     
@@ -4390,6 +4463,12 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
         k_end=ecg_k_end,
         adapt_warmup=ecg_adapt_warmup,
         adapt_window=ecg_adapt_window,
+        tau_target=ecg_tau_target,
+        tau_lr=ecg_tau_lr,
+        tau_ema=ecg_tau_ema,
+        tau_deadzone=ecg_tau_deadzone,
+        tau_min=ecg_tau_min,
+        tau_max=ecg_tau_max,
     )
     
     model_cnn.stage1_epochs = int(stage1_epochs)
@@ -4493,7 +4572,7 @@ if __name__ == '__main__':
     parser.add_argument("--ecg_k", type=float, default=10.0)
     parser.add_argument("--ecg_conf_type", type=str, default="pmax", choices=["pmax", "1-pe", "none"])
     parser.add_argument("--ecg_detach_gates", type=str2bool, default=True)
-    parser.add_argument("--ecg_schedule", type=str, default="none", choices=["none", "linear", "cosine", "adaptive"])
+    parser.add_argument("--ecg_schedule", type=str, default="none", choices=["none", "linear", "cosine", "adaptive", "tau_target"])
     parser.add_argument("--ecg_lam_start", type=float, default=None)
     parser.add_argument("--ecg_lam_end", type=float, default=None)
     parser.add_argument("--ecg_tau_start", type=float, default=None)
@@ -4503,6 +4582,17 @@ if __name__ == '__main__':
 
     parser.add_argument("--ecg_adapt_warmup", type=int, default=10)
     parser.add_argument("--ecg_adapt_window", type=int, default=5)
+    # ---- tau_target schedule (Scheme C): adapt tau to keep gate active fraction near a target ----
+    parser.add_argument("--ecg_tau_target", type=float, default=0.6,
+                        help="Target fraction of samples with conf>tau (i.e., active gates) when --ecg_schedule=tau_target.")
+    parser.add_argument("--ecg_tau_lr", type=float, default=0.10,
+                        help="Update step for tau_target: tau <- tau + lr*(active_frac-target).")
+    parser.add_argument("--ecg_tau_ema", type=float, default=0.90,
+                        help="EMA beta for active_frac (0 disables EMA). Higher = smoother.")
+    parser.add_argument("--ecg_tau_deadzone", type=float, default=0.02,
+                        help="Deadzone for tau_target updates. If |active_frac-target|<deadzone, do not update tau.")
+    parser.add_argument("--ecg_tau_min", type=float, default=0.0)
+    parser.add_argument("--ecg_tau_max", type=float, default=0.99)
 
     parser.add_argument("--force_run", action="store_true")
 
@@ -4689,6 +4779,7 @@ if __name__ == "__main__":
         args.stage1_epochs, args.stage2_epochs,
         args.ecg_lam, args.ecg_tau, args.ecg_k, args.ecg_conf_type, args.ecg_detach_gates,
         args.ecg_schedule, args.ecg_lam_start, args.ecg_lam_end, args.ecg_tau_start, args.ecg_tau_end, args.ecg_k_start, args.ecg_k_end, args.ecg_adapt_warmup, args.ecg_adapt_window,
+        args.ecg_tau_target, args.ecg_tau_lr, args.ecg_tau_ema, args.ecg_tau_deadzone, args.ecg_tau_min, args.ecg_tau_max,
         device, devices_id,
         args.lr, args.momentum, args.batch,
         args.lr_adv, args.momentum_adv, args.batch_adv,
