@@ -1386,6 +1386,8 @@ class trainModel():
                                 )
                         except Exception:
                             pass
+            except Exception:
+                pass
             
             # Also allow lam/k to follow the configured start->end schedule while tau is controlled.
             try:
@@ -1403,8 +1405,6 @@ class trainModel():
                     except Exception:
                         pass
             except Exception:
-                pass
-except Exception:
                 pass
             return
 
