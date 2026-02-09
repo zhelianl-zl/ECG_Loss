@@ -1252,6 +1252,16 @@ class trainModel():
             self.ecg_lam = float(self.ecg_lam_start)
             self.ecg_tau = float(self.ecg_tau_start)
             self.ecg_k = float(self.ecg_k_start)
+        elif self.ecg_schedule == "tau_target":
+            # For tau_target, tau is controlled adaptively during training,
+            # but lam/k may be scheduled. Initialize them to the start values
+            # to avoid using base defaults in epoch 1.
+            if hasattr(self, "ecg_lam_start"):
+                self.ecg_lam = float(self.ecg_lam_start)
+            if hasattr(self, "ecg_k_start"):
+                self.ecg_k = float(self.ecg_k_start)
+            if hasattr(self, "ecg_tau"):
+                self.ecg_tau = float(self.ecg_tau)
 
         return
 
@@ -1300,6 +1310,19 @@ class trainModel():
                 self.ecg_lam = float(st["lam"])
                 self.ecg_tau = float(st["tau"])
                 self.ecg_k = float(st["k"])
+
+        elif sched == "tau_target":
+            # In tau_target mode, tau is updated at epoch end by the controller.
+            # But we still want lam/k to follow a smooth schedule (if start/end are provided)
+            # and to be correctly applied from epoch 1.
+            t = self._ecg_schedule_progress(global_epoch)
+            # lam schedule (fall back to fixed lam if start/end not present)
+            if hasattr(self, "ecg_lam_start") and hasattr(self, "ecg_lam_end"):
+                self.ecg_lam = self._ecg_interp(self.ecg_lam_start, self.ecg_lam_end, t)
+            # k schedule
+            if hasattr(self, "ecg_k_start") and hasattr(self, "ecg_k_end"):
+                self.ecg_k = self._ecg_interp(self.ecg_k_start, self.ecg_k_end, t)
+            # tau stays as the current controller value (self.ecg_tau)
 
         # Log current schedule values once per epoch (if wandb active)
         try:
