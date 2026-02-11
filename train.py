@@ -79,7 +79,7 @@ option_stage2 = 'batch_mix2'
 #option_stage2 = 'batch_granularity'
 
 #Normalize_entropy =  False #   True # 
-cycle_lr = True #False #
+cycle_lr = False #False #
 
 normalization = False #  True #
 normalization_sum = False #   True #   
