@@ -69,8 +69,10 @@ export WANDB_GROUP="cegs_${COMMIT}"
 export WANDB_NAME="task${SLURM_ARRAY_TASK_ID}_${COMMIT}"
 export WANDB_MODE="$WANDB_MODE"
 
-# Activate shared venv from BASE
-source "$BASE/.venv/bin/activate"
+# Activate conda env (Python 3.10)
+source "$HOME/miniconda3/etc/profile.d/conda.sh"
+conda activate cegs
+python -V
 
 cd "$RUN/src"
 python -u tools/run_from_tsv.py \
