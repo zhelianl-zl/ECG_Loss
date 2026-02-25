@@ -5,7 +5,7 @@ CONF_PATH="${1:-sweeps/cifar100.tsv}"
 MAX_PARALLEL="${2:-8}"
 
 # Defaults (override by env or flags if you want)
-ACCOUNT="${ACCOUNT:-cis250019p}"
+ACCOUNT="${ACCOUNT:-cis260049p}"
 PARTITION="${PARTITION:-GPU-shared}"
 QOS="${QOS:-gpu}"
 GRES="${GRES:-gpu:v100-32:1}"
