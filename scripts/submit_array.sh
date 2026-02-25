@@ -1,13 +1,10 @@
-cd ~/projects/cegs/ECG_Loss
-
-cat > scripts/submit_array.sh <<'EOF'
 #!/bin/bash
 set -euo pipefail
 
 CONF_PATH="${1:-sweeps/cifar100.tsv}"
 MAX_PARALLEL="${2:-8}"
 
-# Defaults (override by env if needed)
+# Defaults (override via env if needed)
 ACCOUNT="${ACCOUNT:-cis260049p}"
 PARTITION="${PARTITION:-GPU-shared}"
 QOS="${QOS:-gpu}"
@@ -19,13 +16,13 @@ CONF="$BASE/$CONF_PATH"
 SBATCH_SCRIPT="$BASE/scripts/cegs_array.sbatch"
 
 if [[ ! -f "$CONF" ]]; then
-  echo "Config TSV not found: $CONF"
+  echo "ERROR: Config TSV not found: $CONF" >&2
   exit 2
 fi
 
 # Count tasks robustly:
-# - keep the first non-empty line as header EVEN IF it starts with '#dataset'
-# - skip later comment lines starting with '#'
+# - Treat the FIRST non-empty line as header (even if it starts with '#dataset')
+# - Ignore later comment lines starting with '#'
 mapfile -t LINES < <(awk '
   BEGIN{seen=0}
   /^[[:space:]]*$/ {next}
@@ -37,18 +34,13 @@ mapfile -t LINES < <(awk '
 ' "$CONF")
 
 if (( ${#LINES[@]} < 2 )); then
-  echo "TSV must have header + >=1 data row: $CONF"
+  echo "ERROR: TSV must have header + >=1 data row: $CONF" >&2
   exit 2
 fi
 
 N=$(( ${#LINES[@]} - 1 ))   # exclude header
-echo "BASE=$BASE"
-echo "CONF=$CONF"
-echo "Tasks=$N  MaxParallel=$MAX_PARALLEL"
-echo "ACCOUNT=$ACCOUNT PARTITION=$PARTITION QOS=$QOS GRES=$GRES TIME=$TIME"
 
 # Robust scratch fallback (because $SCRATCH may be undefined on login nodes)
-SCR=""
 if [[ -n "${SCRATCH:-}" ]]; then
   SCR="$SCRATCH"
 elif [[ -d "/scratch/$USER" ]]; then
@@ -69,14 +61,26 @@ export WANDB_MODE="${WANDB_MODE:-offline}"
 mkdir -p "$DATA_DIR" "$RUNS_DIR" || true
 chmod 700 "$DATA_DIR" "$RUNS_DIR" 2>/dev/null || true
 
-sbatch \
+echo "BASE=$BASE"
+echo "CONF=$CONF"
+echo "Tasks=$N  MaxParallel=$MAX_PARALLEL"
+echo "ACCOUNT=$ACCOUNT PARTITION=$PARTITION QOS=$QOS GRES=$GRES TIME=$TIME"
+echo "DATA_DIR=$DATA_DIR"
+echo "RUNS_DIR=$RUNS_DIR"
+echo
+
+# Submit and ALWAYS print the sbatch output
+SUBMIT_OUT=$(sbatch \
   -A "$ACCOUNT" \
   -p "$PARTITION" \
   --qos="$QOS" \
   --gres="$GRES" \
   -t "$TIME" \
   --array="0-$((N-1))%${MAX_PARALLEL}" \
-  "$SBATCH_SCRIPT"
-EOF
+  "$SBATCH_SCRIPT" 2>&1) || {
+    echo "ERROR: sbatch failed:" >&2
+    echo "$SUBMIT_OUT" >&2
+    exit 3
+  }
 
-chmod +x scripts/submit_array.sh
+echo "$SUBMIT_OUT"

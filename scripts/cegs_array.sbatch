@@ -1,4 +1,3 @@
-cat > scripts/cegs_array.sbatch <<'EOF'
 #!/bin/bash
 #SBATCH -N 1
 #SBATCH -t 08:00:00
@@ -13,7 +12,6 @@ BASE="${BASE:-$HOME/projects/cegs/ECG_Loss}"
 CONF="${CONF:-$BASE/sweeps/cifar100.tsv}"
 
 # Robust scratch fallback if DATA_DIR/RUNS_DIR not provided
-SCR=""
 if [[ -n "${SCRATCH:-}" ]]; then
   SCR="$SCRATCH"
 elif [[ -d "/scratch/$USER" ]]; then
@@ -45,7 +43,7 @@ echo "DATA_DIR=$DATA_DIR"
 echo "HOST=$(hostname)"
 echo "START=$(date -Iseconds)"
 
-# Snapshot code into RUN/src (isolation: logs/models won't collide)
+# Snapshot code into RUN/src
 rsync -a --delete \
   --exclude '.git' --exclude '.venv' --exclude '__pycache__' \
   --exclude 'logs' --exclude 'models' --exclude 'wandb' \
@@ -81,4 +79,3 @@ python -u tools/run_from_tsv.py \
   --wandb_mode "$WANDB_MODE"
 
 echo "END=$(date -Iseconds)"
-EOF
