@@ -4,15 +4,16 @@ import os
 import subprocess
 from pathlib import Path
 import fcntl
+from typing import List, Dict, Optional
 
 
-def _read_lines_keep_header(conf_path: Path) -> list[str]:
+def _read_lines_keep_header(conf_path: Path) -> List[str]:
     """
     Returns non-empty lines.
     - The first non-empty line is treated as header (even if it starts with '#dataset').
     - Subsequent lines starting with '#' are treated as comments and skipped.
     """
-    raw_lines = [ln.rstrip("\n") for ln in conf_path.read_text(encoding="utf-8").splitlines()]
+    raw_lines = conf_path.read_text(encoding="utf-8").splitlines()
     # drop empty lines
     nonempty = [ln.strip() for ln in raw_lines if ln.strip()]
     if not nonempty:
@@ -27,11 +28,11 @@ def _read_lines_keep_header(conf_path: Path) -> list[str]:
     return [header] + data
 
 
-def read_tsv_row(conf_path: Path, idx: int) -> dict:
+def read_tsv_row(conf_path: Path, idx: int) -> Dict[str, str]:
     lines = _read_lines_keep_header(conf_path)
     if len(lines) < 2:
         raise RuntimeError(
-            f"{conf_path} must have a header + at least one data row (comments allowed)."
+            "{} must have a header + at least one data row (comments allowed).".format(conf_path)
         )
 
     header_line = lines[0].strip()
@@ -43,13 +44,14 @@ def read_tsv_row(conf_path: Path, idx: int) -> dict:
     data_rows = lines[1:]
 
     if idx < 0 or idx >= len(data_rows):
-        raise IndexError(f"idx={idx} out of range. valid: [0, {len(data_rows)-1}]")
+        raise IndexError("idx={} out of range. valid: [0, {}]".format(idx, len(data_rows) - 1))
 
     row = data_rows[idx].split("\t")
     if len(row) != len(header):
         raise RuntimeError(
-            f"Row field count ({len(row)}) != header field count ({len(header)}).\n"
-            f"Header={header}\nRow={data_rows[idx]}"
+            "Row field count ({}) != header field count ({}).\nHeader={}\nRow={}".format(
+                len(row), len(header), header, data_rows[idx]
+            )
         )
     return dict(zip(header, row))
 
@@ -65,15 +67,14 @@ def ensure_dataset(data_root: Path, dataset: str, auto_download: bool = True) ->
     if not auto_download:
         return
 
-    # Only handle common small datasets; ImageNet etc should be staged manually.
-    supported = {"cifar10", "cifar100", "svhn", "mnist"}
+    supported = set(["cifar10", "cifar100", "svhn", "mnist"])
     if ds not in supported:
         return
 
     data_root.mkdir(parents=True, exist_ok=True)
     lock_path = data_root / ".download.lock"
 
-    with open(lock_path, "w") as f:
+    with open(str(lock_path), "w") as f:
         fcntl.flock(f, fcntl.LOCK_EX)
         try:
             from torchvision import datasets as tvds  # import under lock
@@ -94,6 +95,13 @@ def ensure_dataset(data_root: Path, dataset: str, auto_download: bool = True) ->
             fcntl.flock(f, fcntl.LOCK_UN)
 
 
+def _add_arg(cmd: List[str], flag: str, hp: Dict[str, str], key: str, default: Optional[str] = None) -> None:
+    v = hp.get(key, default)
+    if v is None or v == "":
+        return
+    cmd.extend([flag, str(v)])
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--conf", required=True, help="TSV path with header (comments allowed)")
@@ -106,6 +114,7 @@ def main() -> None:
         default=os.environ.get("WANDB_MODE", "offline"),
         choices=["online", "offline", "disabled"],
     )
+    # default on; set env CEGS_AUTO_DOWNLOAD=0 to disable globally
     ap.add_argument(
         "--auto_download",
         action="store_true",
@@ -123,52 +132,44 @@ def main() -> None:
     # ---------- W&B isolation ----------
     os.environ["WANDB_DIR"] = str(run_dir / "wandb")
     os.environ["WANDB_PROJECT"] = args.wandb_project
-    os.environ["WANDB_GROUP"] = f"{hp.get('dataset','exp')}_{args.commit}"
-    os.environ["WANDB_NAME"] = f"i{args.idx}_seed{hp.get('seed','0')}_{args.commit}"
+    os.environ["WANDB_GROUP"] = "{}_{}".format(hp.get("dataset", "exp"), args.commit)
+    os.environ["WANDB_NAME"] = "i{}_seed{}_{}".format(args.idx, hp.get("seed", "0"), args.commit)
     os.environ["WANDB_MODE"] = args.wandb_mode
 
     # ---------- Data root (shared) ----------
-    # sbatch will export CEGS_DATA_DIR=$SCRATCH/cegs_data
+    # sbatch exports CEGS_DATA_DIR (recommended)
     data_root = Path(os.environ.get("CEGS_DATA_DIR", str(run_dir / "data"))).expanduser().resolve()
 
     # Auto download with lock (no-op for unsupported datasets)
     ensure_dataset(data_root, hp.get("dataset", ""), auto_download=args.auto_download)
 
     # ---------- Build train.py command ----------
-    def add(flag: str, key: str, default: str | None = None) -> list[str]:
-        v = hp.get(key, default)
-        if v is None or v == "":
-            return []
-        return [flag, str(v)]
+    cmd = ["python", "-u", "train.py"]
 
-    cmd: list[str] = ["python", "-u", "train.py"]
+    _add_arg(cmd, "--dataset", hp, "dataset")
+    _add_arg(cmd, "--seed", hp, "seed")
+    _add_arg(cmd, "--stop", hp, "stop", "epochs")
+    _add_arg(cmd, "--stop_val", hp, "stop_val")
+    _add_arg(cmd, "--lr", hp, "lr")
+    _add_arg(cmd, "--batch", hp, "batch")
+    _add_arg(cmd, "--stage1_epochs", hp, "stage1_epochs")
+    _add_arg(cmd, "--stage2_epochs", hp, "stage2_epochs")
+    _add_arg(cmd, "--loss_stage2", hp, "loss_stage2")
 
-    # core
-    cmd += add("--dataset", "dataset")
-    cmd += add("--seed", "seed")
-    cmd += add("--stop", "stop", "epochs")
-    cmd += add("--stop_val", "stop_val")
-    cmd += add("--lr", "lr")
-    cmd += add("--batch", "batch")
-    cmd += add("--stage1_epochs", "stage1_epochs")
-    cmd += add("--stage2_epochs", "stage2_epochs")
-    cmd += add("--loss_stage2", "loss_stage2")
-
-    # ECG/CEGS
-    cmd += add("--ecg_lam", "ecg_lam")
-    cmd += add("--ecg_tau", "ecg_tau")
-    cmd += add("--ecg_k", "ecg_k")
-    cmd += add("--ecg_conf_type", "ecg_conf_type")
-    cmd += add("--ecg_schedule", "ecg_schedule")
+    _add_arg(cmd, "--ecg_lam", hp, "ecg_lam")
+    _add_arg(cmd, "--ecg_tau", hp, "ecg_tau")
+    _add_arg(cmd, "--ecg_k", hp, "ecg_k")
+    _add_arg(cmd, "--ecg_conf_type", hp, "ecg_conf_type")
+    _add_arg(cmd, "--ecg_schedule", hp, "ecg_schedule")
 
     # record for reproducibility
     (run_dir / "cmd.txt").write_text(" ".join(cmd) + "\n", encoding="utf-8")
     (run_dir / "config_row.tsv").write_text(
-        "\t".join([f"{k}={v}" for k, v in hp.items()]) + "\n", encoding="utf-8"
+        "\t".join(["{}={}".format(k, v) for (k, v) in hp.items()]) + "\n",
+        encoding="utf-8",
     )
     (run_dir / "data_root.txt").write_text(str(data_root) + "\n", encoding="utf-8")
 
-    # run
     subprocess.run(cmd, check=True)
 
 
