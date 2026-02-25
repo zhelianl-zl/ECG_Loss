@@ -8,13 +8,13 @@
 set -euo pipefail
 umask 077
 
-# These are provided by submit_array.sh (or you can export them manually)
-BASE="${BASE:-$HOME/projects/cegs/ECG_Loss}"                  # main repo with .venv
-CONF="${CONF:-$BASE/sweeps/cifar100.tsv}"                    # tsv path
-MAX_PARALLEL="${MAX_PARALLEL:-8}"                            # not used here; used by submit
-DATA_DIR="${DATA_DIR:-$SCRATCH/cegs_data}"
-RUNS_DIR="${RUNS_DIR:-$SCRATCH/cegs_runs}"
-WANDB_MODE="${WANDB_MODE:-offline}"                          # offline recommended on compute nodes
+# These are provided by scripts/submit_array.sh (or can be exported manually)
+BASE="${BASE:-$HOME/projects/cegs/ECG_Loss}"            # main repo with .venv
+CONF="${CONF:-$BASE/sweeps/cifar100.tsv}"              # tsv path
+DATA_DIR="${DATA_DIR:-$SCRATCH/cegs_data}"             # shared dataset root
+RUNS_DIR="${RUNS_DIR:-$SCRATCH/cegs_runs}"             # all runs go here
+WANDB_MODE="${WANDB_MODE:-offline}"                    # online/offline/disabled
+AUTO_DOWNLOAD="${CEGS_AUTO_DOWNLOAD:-1}"               # 1 enable, 0 disable
 
 # Unique run directory per task
 RUN="$RUNS_DIR/${SLURM_JOB_NAME}_${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
@@ -44,7 +44,12 @@ echo "$COMMIT" > "$RUN/commit.txt"
 echo "COMMIT=$COMMIT"
 
 # Make ../data (relative to RUN/src) point to shared DATA_DIR
+# RUN/src/.. is RUN, so ../data == RUN/data
 ln -sfn "$DATA_DIR" "$RUN/data"
+
+# Let runner know where to put/download dataset
+export CEGS_DATA_DIR="$DATA_DIR"
+export CEGS_AUTO_DOWNLOAD="$AUTO_DOWNLOAD"
 
 # W&B isolation per task
 export WANDB_DIR="$RUN/wandb"
@@ -55,22 +60,6 @@ export WANDB_MODE="$WANDB_MODE"
 
 # Activate venv from BASE (shared env)
 source "$BASE/.venv/bin/activate"
-
-# Optional: prevent concurrent dataset downloads from corrupting files
-# (If compute nodes can't access internet, this will fail; you can ignore or pre-stage data.)
-LOCK="$DATA_DIR/.download.lock"
-exec 9>"$LOCK"
-flock 9 || true
-python - <<PY || true
-try:
-    from torchvision import datasets
-    root = "$DATA_DIR"
-    # quick no-op: only ensures root exists; actual download handled inside datasets if you call them
-    print("torchvision datasets import OK; data_root=", root)
-except Exception as e:
-    print("Skip torchvision precheck:", e)
-PY
-flock -u 9 || true
 
 cd "$RUN/src"
 python -u tools/run_from_tsv.py \
