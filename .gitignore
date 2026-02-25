@@ -21,3 +21,18 @@ __pycache__/
 # OS / IDE
 .vscode/
 .DS_Store
+
+.venv/
+__pycache__/
+*.pyc
+
+logs/
+models/
+wandb/
+cegs_runs/
+*.pt
+*.pth
+*.ckpt
+
+slurm_*.out
+slurm_*.err
