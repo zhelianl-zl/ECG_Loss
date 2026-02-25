@@ -1,6 +1,6 @@
-# tools/run_from_tsv.py
 import argparse
 import os
+import re
 import subprocess
 from pathlib import Path
 import fcntl
@@ -8,17 +8,10 @@ from typing import List, Dict, Optional
 
 
 def _read_lines_keep_header(conf_path: Path) -> List[str]:
-    """
-    Returns non-empty lines.
-    - The first non-empty line is treated as header (even if it starts with '#dataset').
-    - Subsequent lines starting with '#' are treated as comments and skipped.
-    """
     raw_lines = conf_path.read_text(encoding="utf-8").splitlines()
-    # drop empty lines
     nonempty = [ln.strip() for ln in raw_lines if ln.strip()]
     if not nonempty:
         return []
-
     header = nonempty[0]
     data = []
     for ln in nonempty[1:]:
@@ -31,54 +24,33 @@ def _read_lines_keep_header(conf_path: Path) -> List[str]:
 def read_tsv_row(conf_path: Path, idx: int) -> Dict[str, str]:
     lines = _read_lines_keep_header(conf_path)
     if len(lines) < 2:
-        raise RuntimeError(
-            "{} must have a header + at least one data row (comments allowed).".format(conf_path)
-        )
+        raise RuntimeError(f"{conf_path} must have a header + at least one data row")
 
     header_line = lines[0].strip()
-    # allow header like "#dataset\tseed\t..."
     if header_line.startswith("#"):
         header_line = header_line.lstrip("#").strip()
-
     header = header_line.split("\t")
-    data_rows = lines[1:]
 
-    if idx < 0 or idx >= len(data_rows):
-        raise IndexError("idx={} out of range. valid: [0, {}]".format(idx, len(data_rows) - 1))
-
-    row = data_rows[idx].split("\t")
+    row = lines[idx + 1].split("\t")
     if len(row) != len(header):
-        raise RuntimeError(
-            "Row field count ({}) != header field count ({}).\nHeader={}\nRow={}".format(
-                len(row), len(header), header, data_rows[idx]
-            )
-        )
+        raise RuntimeError("Row field count != header field count")
     return dict(zip(header, row))
 
 
-def ensure_dataset(data_root: Path, dataset: str, auto_download: bool = True) -> None:
-    """
-    Auto-download common torchvision datasets into data_root, with a filesystem lock
-    to avoid concurrent downloads corrupting files.
-
-    If dataset is not recognized or auto_download=False, this is a no-op.
-    """
+def ensure_dataset(data_root: Path, dataset: str, auto_download: bool) -> None:
     ds = (dataset or "").strip().lower()
     if not auto_download:
         return
-
-    supported = set(["cifar10", "cifar100", "svhn", "mnist"])
+    supported = {"cifar10", "cifar100", "svhn", "mnist"}
     if ds not in supported:
         return
 
     data_root.mkdir(parents=True, exist_ok=True)
     lock_path = data_root / ".download.lock"
-
     with open(str(lock_path), "w") as f:
         fcntl.flock(f, fcntl.LOCK_EX)
         try:
-            from torchvision import datasets as tvds  # import under lock
-
+            from torchvision import datasets as tvds
             if ds == "cifar10":
                 tvds.CIFAR10(root=str(data_root), train=True, download=True)
                 tvds.CIFAR10(root=str(data_root), train=False, download=True)
@@ -102,25 +74,22 @@ def _add_arg(cmd: List[str], flag: str, hp: Dict[str, str], key: str, default: O
     cmd.extend([flag, str(v)])
 
 
+def choose_wandb_project(dataset: str) -> str:
+    ds = (dataset or "").strip().lower()
+    ds_key = re.sub(r"[^a-z0-9]+", "_", ds).strip("_")  # cifar100, svhn, cifar10...
+    # allow either lower or upper key in env
+    for k in (f"WANDB_PROJECT_{ds_key}", f"WANDB_PROJECT_{ds_key.upper()}"):
+        if k in os.environ and os.environ[k].strip():
+            return os.environ[k].strip()
+    return os.environ.get("WANDB_PROJECT_DEFAULT", "CEGS").strip()
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--conf", required=True, help="TSV path with header (comments allowed)")
-    ap.add_argument("--idx", type=int, required=True, help="0-based row index excluding header")
-    ap.add_argument("--run_dir", required=True, help="Run directory (e.g., $SCRATCH/cegs_runs/...)")
-    ap.add_argument("--commit", default="unknown", help="Short git commit hash for naming")
-    ap.add_argument("--wandb_project", default=os.environ.get("WANDB_PROJECT", "CEGS"))
-    ap.add_argument(
-        "--wandb_mode",
-        default=os.environ.get("WANDB_MODE", "offline"),
-        choices=["online", "offline", "disabled"],
-    )
-    # default on; set env CEGS_AUTO_DOWNLOAD=0 to disable globally
-    ap.add_argument(
-        "--auto_download",
-        action="store_true",
-        default=(os.environ.get("CEGS_AUTO_DOWNLOAD", "1") != "0"),
-        help="Auto-download supported datasets (default on; set env CEGS_AUTO_DOWNLOAD=0 to disable).",
-    )
+    ap.add_argument("--conf", required=True)
+    ap.add_argument("--idx", type=int, required=True)
+    ap.add_argument("--run_dir", required=True)
+    ap.add_argument("--commit", default="unknown")
     args = ap.parse_args()
 
     conf_path = Path(args.conf).expanduser().resolve()
@@ -129,23 +98,50 @@ def main() -> None:
 
     hp = read_tsv_row(conf_path, args.idx)
 
-    # ---------- W&B isolation ----------
-    os.environ["WANDB_DIR"] = str(run_dir / "wandb")
-    os.environ["WANDB_PROJECT"] = args.wandb_project
-    os.environ["WANDB_GROUP"] = "{}_{}".format(hp.get("dataset", "exp"), args.commit)
-    os.environ["WANDB_NAME"] = "i{}_seed{}_{}".format(args.idx, hp.get("seed", "0"), args.commit)
-    os.environ["WANDB_MODE"] = args.wandb_mode
+    dataset = hp.get("dataset", "").strip()
+    seed = hp.get("seed", "0").strip()
+    stop_val = hp.get("stop_val", "").strip()
+    stage1 = hp.get("stage1_epochs", "").strip()
+    stage2 = hp.get("stage2_epochs", "").strip()
 
-    # ---------- Data root (shared) ----------
-    # sbatch exports CEGS_DATA_DIR (recommended)
+    # method/run_kind (optional columns; otherwise inferred)
+    method_name = (hp.get("method_name") or hp.get("loss_stage2") or "exp").strip()
+    run_kind = (hp.get("run_kind") or os.environ.get("WANDB_JOB_TYPE_DEFAULT", "official")).strip()
+
+    # choose project by dataset (cifar100 -> ecg_Cifar_100)
+    project = choose_wandb_project(dataset)
+
+    # notebook-style naming
+    total_epochs = stop_val or "T?"
+    run_name = f"{dataset}_{method_name}_s{seed}_T{total_epochs}"
+    group = f"{dataset}_{run_kind}_s{seed}_T{total_epochs}"
+
+    tags = [
+        run_kind, dataset, f"s{seed}", method_name,
+        f"T{total_epochs}",
+    ]
+    if stage1:
+        tags.append(f"s1{stage1}")
+    if stage2:
+        tags.append(f"s2{stage2}")
+
+    # W&B env
+    os.environ["WANDB_PROJECT"] = project
+    if os.environ.get("WANDB_ENTITY", "").strip():
+        os.environ["WANDB_ENTITY"] = os.environ["WANDB_ENTITY"].strip()
+    os.environ["WANDB_NAME"] = run_name
+    os.environ["WANDB_GROUP"] = group
+    os.environ["WANDB_JOB_TYPE"] = run_kind
+    os.environ["WANDB_TAGS"] = ",".join(tags)
+    os.environ["PYTHONUNBUFFERED"] = "1"
+
+    # data root
     data_root = Path(os.environ.get("CEGS_DATA_DIR", str(run_dir / "data"))).expanduser().resolve()
+    auto_download = os.environ.get("CEGS_AUTO_DOWNLOAD", "1") != "0"
+    ensure_dataset(data_root, dataset, auto_download=auto_download)
 
-    # Auto download with lock (no-op for unsupported datasets)
-    ensure_dataset(data_root, hp.get("dataset", ""), auto_download=args.auto_download)
-
-    # ---------- Build train.py command ----------
-    cmd = ["python", "-u", "train.py"]
-
+    # build train.py cmd
+    cmd: List[str] = ["python", "-u", "train.py"]
     _add_arg(cmd, "--dataset", hp, "dataset")
     _add_arg(cmd, "--seed", hp, "seed")
     _add_arg(cmd, "--stop", hp, "stop", "epochs")
@@ -162,13 +158,12 @@ def main() -> None:
     _add_arg(cmd, "--ecg_conf_type", hp, "ecg_conf_type")
     _add_arg(cmd, "--ecg_schedule", hp, "ecg_schedule")
 
-    # record for reproducibility
+    # record
     (run_dir / "cmd.txt").write_text(" ".join(cmd) + "\n", encoding="utf-8")
-    (run_dir / "config_row.tsv").write_text(
-        "\t".join(["{}={}".format(k, v) for (k, v) in hp.items()]) + "\n",
+    (run_dir / "wandb_meta.txt").write_text(
+        f"project={project}\nentity={os.environ.get('WANDB_ENTITY','')}\nname={run_name}\ngroup={group}\n",
         encoding="utf-8",
     )
-    (run_dir / "data_root.txt").write_text(str(data_root) + "\n", encoding="utf-8")
 
     subprocess.run(cmd, check=True)
 
