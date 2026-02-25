@@ -34,6 +34,9 @@ echo "Tasks=$N  MaxParallel=$MAX_PARALLEL"
 echo "ACCOUNT=$ACCOUNT PARTITION=$PARTITION QOS=$QOS GRES=$GRES TIME=$TIME"
 
 export BASE CONF MAX_PARALLEL
+
+SCR="${SCRATCH:-/scratch/$USER}"
+
 export DATA_DIR="${DATA_DIR:-$SCRATCH/cegs_data}"
 export RUNS_DIR="${RUNS_DIR:-$SCRATCH/cegs_runs}"
 export WANDB_MODE="${WANDB_MODE:-offline}"
