@@ -13,7 +13,7 @@ def _read_lines_keep_header(conf_path: Path) -> List[str]:
     if not nonempty:
         return []
     header = nonempty[0]
-    data = []
+    data: List[str] = []
     for ln in nonempty[1:]:
         if ln.lstrip().startswith("#"):
             continue
@@ -31,7 +31,11 @@ def read_tsv_row(conf_path: Path, idx: int) -> Dict[str, str]:
         header_line = header_line.lstrip("#").strip()
     header = header_line.split("\t")
 
-    row = lines[idx + 1].split("\t")
+    data_rows = lines[1:]
+    if idx < 0 or idx >= len(data_rows):
+        raise IndexError(f"idx {idx} out of range [0, {len(data_rows)-1}]")
+
+    row = data_rows[idx].split("\t")
     if len(row) != len(header):
         raise RuntimeError("Row field count != header field count")
     return dict(zip(header, row))
@@ -74,13 +78,27 @@ def _add_arg(cmd: List[str], flag: str, hp: Dict[str, str], key: str, default: O
     cmd.extend([flag, str(v)])
 
 
-def choose_wandb_project(dataset: str) -> str:
+def _dataset_key(dataset: str) -> str:
     ds = (dataset or "").strip().lower()
-    ds_key = re.sub(r"[^a-z0-9]+", "_", ds).strip("_")  # cifar100, svhn, cifar10...
-    # allow either lower or upper key in env
-    for k in (f"WANDB_PROJECT_{ds_key}", f"WANDB_PROJECT_{ds_key.upper()}"):
-        if k in os.environ and os.environ[k].strip():
-            return os.environ[k].strip()
+    return re.sub(r"[^a-z0-9]+", "_", ds).strip("_")  # imagenet-1k -> imagenet_1k
+
+
+def choose_wandb_project(dataset: str) -> str:
+    ds_key = _dataset_key(dataset)
+    # 1) explicit mapping: WANDB_PROJECT_cifar100=...
+    v = os.environ.get(f"WANDB_PROJECT_{ds_key}")
+    if v:
+        return v.strip()
+    v = os.environ.get(f"WANDB_PROJECT_{ds_key.upper()}")
+    if v:
+        return v.strip()
+
+    # 2) pattern: WANDB_PROJECT_PATTERN="ecg_{dataset}"
+    pat = os.environ.get("WANDB_PROJECT_PATTERN", "").strip()
+    if pat:
+        return pat.format(dataset=ds_key)
+
+    # 3) default
     return os.environ.get("WANDB_PROJECT_DEFAULT", "CEGS").strip()
 
 
@@ -98,35 +116,28 @@ def main() -> None:
 
     hp = read_tsv_row(conf_path, args.idx)
 
-    dataset = hp.get("dataset", "").strip()
-    seed = hp.get("seed", "0").strip()
-    stop_val = hp.get("stop_val", "").strip()
-    stage1 = hp.get("stage1_epochs", "").strip()
-    stage2 = hp.get("stage2_epochs", "").strip()
+    dataset = (hp.get("dataset") or "").strip()
+    seed = (hp.get("seed") or "0").strip()
+    stop_val = (hp.get("stop_val") or "").strip()
+    stage1 = (hp.get("stage1_epochs") or "").strip()
+    stage2 = (hp.get("stage2_epochs") or "").strip()
 
-    # method/run_kind (optional columns; otherwise inferred)
+    # Optional TSV columns (recommended): method_name, run_kind
     method_name = (hp.get("method_name") or hp.get("loss_stage2") or "exp").strip()
     run_kind = (hp.get("run_kind") or os.environ.get("WANDB_JOB_TYPE_DEFAULT", "official")).strip()
 
-    # choose project by dataset (cifar100 -> ecg_Cifar_100)
-    project = choose_wandb_project(dataset)
-
-    # notebook-style naming
     total_epochs = stop_val or "T?"
     run_name = f"{dataset}_{method_name}_s{seed}_T{total_epochs}"
     group = f"{dataset}_{run_kind}_s{seed}_T{total_epochs}"
 
-    tags = [
-        run_kind, dataset, f"s{seed}", method_name,
-        f"T{total_epochs}",
-    ]
+    tags = [run_kind, dataset, f"s{seed}", method_name, f"T{total_epochs}"]
     if stage1:
         tags.append(f"s1{stage1}")
     if stage2:
         tags.append(f"s2{stage2}")
 
-    # W&B env
-    os.environ["WANDB_PROJECT"] = project
+    # W&B env (project routing)
+    os.environ["WANDB_PROJECT"] = choose_wandb_project(dataset)
     if os.environ.get("WANDB_ENTITY", "").strip():
         os.environ["WANDB_ENTITY"] = os.environ["WANDB_ENTITY"].strip()
     os.environ["WANDB_NAME"] = run_name
@@ -138,7 +149,13 @@ def main() -> None:
     # data root
     data_root = Path(os.environ.get("CEGS_DATA_DIR", str(run_dir / "data"))).expanduser().resolve()
     auto_download = os.environ.get("CEGS_AUTO_DOWNLOAD", "1") != "0"
-    ensure_dataset(data_root, dataset, auto_download=auto_download)
+    try:
+        ensure_dataset(data_root, dataset, auto_download=auto_download)
+    except Exception as e:
+        # If compute nodes have no internet, this will fail.
+        # You can set CEGS_AUTO_DOWNLOAD=0 after pre-downloading data.
+        print(f"[WARN] dataset auto-download failed: {e}")
+        print(f"[WARN] data_root={data_root} dataset={dataset} CEGS_AUTO_DOWNLOAD={os.environ.get('CEGS_AUTO_DOWNLOAD','1')}")
 
     # build train.py cmd
     cmd: List[str] = ["python", "-u", "train.py"]
@@ -158,10 +175,14 @@ def main() -> None:
     _add_arg(cmd, "--ecg_conf_type", hp, "ecg_conf_type")
     _add_arg(cmd, "--ecg_schedule", hp, "ecg_schedule")
 
-    # record
     (run_dir / "cmd.txt").write_text(" ".join(cmd) + "\n", encoding="utf-8")
     (run_dir / "wandb_meta.txt").write_text(
-        f"project={project}\nentity={os.environ.get('WANDB_ENTITY','')}\nname={run_name}\ngroup={group}\n",
+        f"project={os.environ.get('WANDB_PROJECT','')}\n"
+        f"entity={os.environ.get('WANDB_ENTITY','')}\n"
+        f"name={run_name}\n"
+        f"group={group}\n"
+        f"job_type={run_kind}\n"
+        f"tags={','.join(tags)}\n",
         encoding="utf-8",
     )
 
