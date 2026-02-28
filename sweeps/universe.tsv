@@ -1,0 +1,22 @@
+#wandb_project=ecg-loss
+# You can also do: #wandb_project: ecg-loss
+# Notes:
+# - Full-line comments starting with # are ignored.
+# - No inline comments (end-of-line # ...) supported.
+#
+#dataset	seed	stop	stop_val	lr	batch	stage1_epochs	stage2_epochs	loss_stage2	ecg_conf_type	ecg_schedule	ecg_lam_start	ecg_lam_end	ecg_tau_start	ecg_tau_end	ecg_k_start	ecg_k_end	wandb_group
+# ===== CIFAR-100 =====
+cifar100	0	epochs	60	0.01	100	30	30	ecg	pmax	linear	0.0	1.0	0.50	0.80	0.0	10.0	universal
+cifar100	1	epochs	60	0.01	100	30	30	ecg	pmax	linear	0.0	1.0	0.50	0.80	0.0	10.0	universal
+
+# ===== CIFAR-10 =====
+cifar10	0	epochs	60	0.01	128	30	30	ecg	pmax	linear	0.0	1.0	0.50	0.80	0.0	10.0	universal
+
+# ===== Binary CIFAR-10 =====
+binary	0	epochs	60	0.01	128	30	30	ecg	pmax	linear	0.0	1.0	0.50	0.80	0.0	10.0	universal
+
+# ===== SVHN =====
+svhn	0	epochs	60	0.01	128	30	30	ecg	pmax	linear	0.0	1.0	0.50	0.80	0.0	10.0	universal
+
+# ===== ImageNet (your code uses imageNet-32/64 folders under CEGS_DATA_DIR/imageNet) =====
+image1k	0	epochs	90	0.10	256	45	45	ecg	pmax	linear	0.0	1.0	0.50	0.80	0.0	10.0	universal

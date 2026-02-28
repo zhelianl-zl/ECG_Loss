@@ -1,9 +1,0 @@
-#dataset	seed	stop	stop_val	lr	batch	stage1_epochs	stage2_epochs	loss_stage2	ecg_lam	ecg_tau	ecg_k	ecg_conf_type	ecg_schedule
-cifar100	0	epochs	60	0.01	100	30	30	ecg	1.0	0.7	10.0	pmax	linear
-cifar100	1	epochs	60	0.01	100	30	30	ecg	1.0	0.7	10.0	pmax	linear
-cifar100	2	epochs	60	0.01	100	30	30	ecg	1.0	0.7	10.0	pmax	linear
-cifar100	3	epochs	60	0.01	100	30	30	ecg	1.0	0.7	10.0	pmax	linear
-cifar100	4	epochs	60	0.01	100	30	30	ecg	1.0	0.7	10.0	pmax	linear
-cifar100	5	epochs	60	0.01	100	30	30	ecg	1.0	0.7	10.0	pmax	linear
-cifar100	6	epochs	60	0.01	100	30	30	ecg	1.0	0.7	10.0	pmax	linear
-cifar100	7	epochs	60	0.01	100	30	30	ecg	1.0	0.7	10.0	pmax	linear

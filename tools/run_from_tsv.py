@@ -1,193 +1,224 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+run_from_tsv.py (v2)
+
+Purpose
+- Run one experiment per TSV row (PSC Slurm array friendly).
+- Supports a top-of-file metadata directive:
+    #wandb_project=YOUR_PROJECT
+  which acts as the default W&B project for all rows.
+  A per-row column "wandb_project" overrides the default.
+
+Other features
+- Skips blank lines and full-line comments beginning with '#'
+- Dataset aliases:
+    binary -> binaryCifar10
+    image1k -> imageNet
+    cifar-10 -> cifar10
+    cifar-100 -> cifar100
+- Passes schedule start/end params so ecg_schedule=linear/cosine truly varies:
+    ecg_lam_start/end, ecg_tau_start/end, ecg_k_start/end
+
+Usage
+- Local:   python tools/run_from_tsv.py --conf sweeps/universal.tsv --idx 0
+- Slurm:   SLURM_ARRAY_TASK_ID is used when --idx is not provided.
+"""
+
 import argparse
+import csv
 import os
-import re
+import shlex
 import subprocess
-from pathlib import Path
-import fcntl
-from typing import List, Dict, Optional
+import sys
+from typing import Any, Dict, List, Tuple
 
 
-def _read_lines_keep_header(conf_path: Path) -> List[str]:
-    raw_lines = conf_path.read_text(encoding="utf-8").splitlines()
-    nonempty = [ln.strip() for ln in raw_lines if ln.strip()]
-    if not nonempty:
-        return []
-    header = nonempty[0]
-    data: List[str] = []
-    for ln in nonempty[1:]:
-        if ln.lstrip().startswith("#"):
-            continue
-        data.append(ln)
-    return [header] + data
+TRAIN_ENTRY = "train.py"  # change if your entry script is different
 
 
-def read_tsv_row(conf_path: Path, idx: int) -> Dict[str, str]:
-    lines = _read_lines_keep_header(conf_path)
-    if len(lines) < 2:
-        raise RuntimeError(f"{conf_path} must have a header + at least one data row")
-
-    header_line = lines[0].strip()
-    if header_line.startswith("#"):
-        header_line = header_line.lstrip("#").strip()
-    header = header_line.split("\t")
-
-    data_rows = lines[1:]
-    if idx < 0 or idx >= len(data_rows):
-        raise IndexError(f"idx {idx} out of range [0, {len(data_rows)-1}]")
-
-    row = data_rows[idx].split("\t")
-    if len(row) != len(header):
-        raise RuntimeError("Row field count != header field count")
-    return dict(zip(header, row))
+def _to_str(x: Any) -> str:
+    return "" if x is None else str(x).strip()
 
 
-def ensure_dataset(data_root: Path, dataset: str, auto_download: bool) -> None:
-    ds = (dataset or "").strip().lower()
-    if not auto_download:
+def _normalize_dataset_name(ds: str) -> str:
+    d = (ds or "").strip().lower()
+    mapping = {
+        "binary": "binaryCifar10",
+        "binarycifar10": "binaryCifar10",
+        "binary-cifar10": "binaryCifar10",
+        "imagenet": "imageNet",
+        "image1k": "imageNet",
+        "image-net": "imageNet",
+        "cifar-10": "cifar10",
+        "cifar10": "cifar10",
+        "cifar-100": "cifar100",
+        "cifar100": "cifar100",
+        "svhn": "svhn",
+    }
+    return mapping.get(d, ds)
+
+
+def _add_arg(cmd: List[str], flag: str, row: Dict[str, str], key: str) -> None:
+    if key not in row:
         return
-    supported = {"cifar10", "cifar100", "svhn", "mnist"}
-    if ds not in supported:
+    val = _to_str(row.get(key))
+    if val == "":
         return
-
-    data_root.mkdir(parents=True, exist_ok=True)
-    lock_path = data_root / ".download.lock"
-    with open(str(lock_path), "w") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
-        try:
-            from torchvision import datasets as tvds
-            if ds == "cifar10":
-                tvds.CIFAR10(root=str(data_root), train=True, download=True)
-                tvds.CIFAR10(root=str(data_root), train=False, download=True)
-            elif ds == "cifar100":
-                tvds.CIFAR100(root=str(data_root), train=True, download=True)
-                tvds.CIFAR100(root=str(data_root), train=False, download=True)
-            elif ds == "svhn":
-                tvds.SVHN(root=str(data_root), split="train", download=True)
-                tvds.SVHN(root=str(data_root), split="test", download=True)
-            elif ds == "mnist":
-                tvds.MNIST(root=str(data_root), train=True, download=True)
-                tvds.MNIST(root=str(data_root), train=False, download=True)
-        finally:
-            fcntl.flock(f, fcntl.LOCK_UN)
+    cmd.extend([flag, val])
 
 
-def _add_arg(cmd: List[str], flag: str, hp: Dict[str, str], key: str, default: Optional[str] = None) -> None:
-    v = hp.get(key, default)
-    if v is None or v == "":
-        return
-    cmd.extend([flag, str(v)])
+def _read_tsv_with_meta(path: str) -> Tuple[List[Dict[str, str]], Dict[str, str]]:
+    """
+    Parses TSV rows + top-of-file meta directives.
+
+    Meta directives (full-line comments only):
+        #wandb_project=foo
+        #wandb_project: foo
+    """
+    rows: List[Dict[str, str]] = []
+    meta: Dict[str, str] = {}
+
+    data_lines: List[str] = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            s = line.rstrip("\n")
+            if s.strip() == "":
+                continue
+
+            # Full-line comments
+            if s.lstrip().startswith("#"):
+                t = s.lstrip()[1:].strip()  # remove '#'
+                # parse wandb_project directive
+                lower = t.lower()
+                if lower.startswith("wandb_project=") or lower.startswith("wandb_project:"):
+                    if "=" in t:
+                        meta["wandb_project"] = t.split("=", 1)[1].strip()
+                    else:
+                        meta["wandb_project"] = t.split(":", 1)[1].strip()
+                # ignore all other comment lines
+                continue
+
+            data_lines.append(s)
+
+    if not data_lines:
+        raise ValueError(f"TSV has no data/header after removing comments: {path}")
+
+    reader = csv.DictReader(data_lines, delimiter="\t")
+    if reader.fieldnames is None:
+        raise ValueError(f"Cannot parse TSV header: {path}")
+
+    for r in reader:
+        rr = {k.strip(): (_to_str(v)) for k, v in r.items() if k is not None}
+        rows.append(rr)
+
+    return rows, meta
 
 
-def _dataset_key(dataset: str) -> str:
-    ds = (dataset or "").strip().lower()
-    return re.sub(r"[^a-z0-9]+", "_", ds).strip("_")  # imagenet-1k -> imagenet_1k
+def _build_cmd(row: Dict[str, str], meta: Dict[str, str], python_bin: str) -> List[str]:
+    cmd: List[str] = [python_bin, TRAIN_ENTRY]
+
+    # dataset
+    ds_raw = _to_str(row.get("dataset"))
+    ds = _normalize_dataset_name(ds_raw)
+    if ds:
+        cmd.extend(["--dataset", ds])
+
+    # common
+    _add_arg(cmd, "--seed", row, "seed")
+    _add_arg(cmd, "--lr", row, "lr")
+    _add_arg(cmd, "--batch", row, "batch")
+    _add_arg(cmd, "--epochs", row, "epochs")
+    _add_arg(cmd, "--stage1_epochs", row, "stage1_epochs")
+    _add_arg(cmd, "--stage2_epochs", row, "stage2_epochs")
+    _add_arg(cmd, "--stop", row, "stop")
+    _add_arg(cmd, "--stop_val", row, "stop_val")
+    _add_arg(cmd, "--weight_decay", row, "weight_decay")
+    _add_arg(cmd, "--model", row, "model")
+    _add_arg(cmd, "--optimizer", row, "optimizer")
+
+    # ECG/CEGS knobs
+    _add_arg(cmd, "--loss_stage2", row, "loss_stage2")
+    _add_arg(cmd, "--ecg_conf_type", row, "ecg_conf_type")
+    _add_arg(cmd, "--ecg_schedule", row, "ecg_schedule")
+
+    # legacy constants (still OK)
+    _add_arg(cmd, "--ecg_lam", row, "ecg_lam")
+    _add_arg(cmd, "--ecg_tau", row, "ecg_tau")
+    _add_arg(cmd, "--ecg_k", row, "ecg_k")
+
+    # schedule start/end for true linear/cosine
+    _add_arg(cmd, "--ecg_lam_start", row, "ecg_lam_start")
+    _add_arg(cmd, "--ecg_lam_end", row, "ecg_lam_end")
+    _add_arg(cmd, "--ecg_tau_start", row, "ecg_tau_start")
+    _add_arg(cmd, "--ecg_tau_end", row, "ecg_tau_end")
+    _add_arg(cmd, "--ecg_k_start", row, "ecg_k_start")
+    _add_arg(cmd, "--ecg_k_end", row, "ecg_k_end")
+
+    # tau_target controller knobs (optional)
+    _add_arg(cmd, "--ecg_tau_target", row, "ecg_tau_target")
+    _add_arg(cmd, "--ecg_tau_lr", row, "ecg_tau_lr")
+    _add_arg(cmd, "--ecg_tau_ema", row, "ecg_tau_ema")
+    _add_arg(cmd, "--ecg_tau_deadzone", row, "ecg_tau_deadzone")
+    _add_arg(cmd, "--ecg_tau_min", row, "ecg_tau_min")
+    _add_arg(cmd, "--ecg_tau_max", row, "ecg_tau_max")
+
+    # W&B (row overrides meta)
+    if _to_str(row.get("wandb_project")):
+        _add_arg(cmd, "--wandb_project", row, "wandb_project")
+    elif _to_str(meta.get("wandb_project")):
+        cmd.extend(["--wandb_project", meta["wandb_project"]])
+
+    _add_arg(cmd, "--wandb_name", row, "wandb_name")
+    _add_arg(cmd, "--wandb_group", row, "wandb_group")
+
+    # misc logging/run dirs (if your train.py supports these)
+    _add_arg(cmd, "--run_dir", row, "run_dir")
+    _add_arg(cmd, "--tag", row, "tag")
+
+    return cmd
 
 
-def choose_wandb_project(dataset: str) -> str:
-    ds_key = _dataset_key(dataset)
-    # 1) explicit mapping: WANDB_PROJECT_cifar100=...
-    v = os.environ.get(f"WANDB_PROJECT_{ds_key}")
-    if v:
-        return v.strip()
-    v = os.environ.get(f"WANDB_PROJECT_{ds_key.upper()}")
-    if v:
-        return v.strip()
-
-    # 2) pattern: WANDB_PROJECT_PATTERN="ecg_{dataset}"
-    pat = os.environ.get("WANDB_PROJECT_PATTERN", "").strip()
-    if pat:
-        return pat.format(dataset=ds_key)
-
-    # 3) default
-    return os.environ.get("WANDB_PROJECT_DEFAULT", "CEGS").strip()
-
-
-def main() -> None:
+def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--conf", required=True)
-    ap.add_argument("--idx", type=int, required=True)
-    ap.add_argument("--run_dir", required=True)
-    ap.add_argument("--commit", default="unknown")
+    ap.add_argument("--conf", required=True, help="TSV config path")
+    ap.add_argument("--idx", type=int, default=None, help="Row index (0-based). If omitted, uses SLURM_ARRAY_TASK_ID.")
+    ap.add_argument("--python", default=sys.executable, help="Python executable to use.")
+    ap.add_argument("--dry_run", action="store_true", help="Print the command and exit.")
     args = ap.parse_args()
 
-    conf_path = Path(args.conf).expanduser().resolve()
-    run_dir = Path(args.run_dir).expanduser().resolve()
-    run_dir.mkdir(parents=True, exist_ok=True)
+    rows, meta = _read_tsv_with_meta(args.conf)
 
-    hp = read_tsv_row(conf_path, args.idx)
+    idx = args.idx
+    if idx is None:
+        sid = os.environ.get("SLURM_ARRAY_TASK_ID")
+        if sid and sid.strip():
+            idx = int(sid)
 
-    dataset = (hp.get("dataset") or "").strip()
-    seed = (hp.get("seed") or "0").strip()
-    stop_val = (hp.get("stop_val") or "").strip()
-    stage1 = (hp.get("stage1_epochs") or "").strip()
-    stage2 = (hp.get("stage2_epochs") or "").strip()
+    if idx is None:
+        print("ERROR: provide --idx or set SLURM_ARRAY_TASK_ID", file=sys.stderr)
+        return 2
 
-    # Optional TSV columns (recommended): method_name, run_kind
-    method_name = (hp.get("method_name") or hp.get("loss_stage2") or "exp").strip()
-    run_kind = (hp.get("run_kind") or os.environ.get("WANDB_JOB_TYPE_DEFAULT", "official")).strip()
+    if idx < 0 or idx >= len(rows):
+        print(f"ERROR: idx {idx} out of range (rows={len(rows)})", file=sys.stderr)
+        return 2
 
-    total_epochs = stop_val or "T?"
-    run_name = f"{dataset}_{method_name}_s{seed}_T{total_epochs}"
-    group = f"{dataset}_{run_kind}_s{seed}_T{total_epochs}"
+    row = rows[idx]
+    cmd = _build_cmd(row, meta, args.python)
 
-    tags = [run_kind, dataset, f"s{seed}", method_name, f"T{total_epochs}"]
-    if stage1:
-        tags.append(f"s1{stage1}")
-    if stage2:
-        tags.append(f"s2{stage2}")
+    print(f"[run_from_tsv] conf={args.conf} idx={idx} dataset={row.get('dataset','')}")
+    if meta.get("wandb_project"):
+        print(f"[run_from_tsv] default wandb_project={meta['wandb_project']}")
+    print("[run_from_tsv] cmd:")
+    print("  " + " ".join(shlex.quote(x) for x in cmd))
 
-    # W&B env (project routing)
-    os.environ["WANDB_PROJECT"] = choose_wandb_project(dataset)
-    if os.environ.get("WANDB_ENTITY", "").strip():
-        os.environ["WANDB_ENTITY"] = os.environ["WANDB_ENTITY"].strip()
-    os.environ["WANDB_NAME"] = run_name
-    os.environ["WANDB_GROUP"] = group
-    os.environ["WANDB_JOB_TYPE"] = run_kind
-    os.environ["WANDB_TAGS"] = ",".join(tags)
-    os.environ["PYTHONUNBUFFERED"] = "1"
+    if args.dry_run:
+        return 0
 
-    # data root
-    data_root = Path(os.environ.get("CEGS_DATA_DIR", str(run_dir / "data"))).expanduser().resolve()
-    auto_download = os.environ.get("CEGS_AUTO_DOWNLOAD", "1") != "0"
-    try:
-        ensure_dataset(data_root, dataset, auto_download=auto_download)
-    except Exception as e:
-        # If compute nodes have no internet, this will fail.
-        # You can set CEGS_AUTO_DOWNLOAD=0 after pre-downloading data.
-        print(f"[WARN] dataset auto-download failed: {e}")
-        print(f"[WARN] data_root={data_root} dataset={dataset} CEGS_AUTO_DOWNLOAD={os.environ.get('CEGS_AUTO_DOWNLOAD','1')}")
-
-    # build train.py cmd
-    cmd: List[str] = ["python", "-u", "train.py"]
-    _add_arg(cmd, "--dataset", hp, "dataset")
-    _add_arg(cmd, "--seed", hp, "seed")
-    _add_arg(cmd, "--stop", hp, "stop", "epochs")
-    _add_arg(cmd, "--stop_val", hp, "stop_val")
-    _add_arg(cmd, "--lr", hp, "lr")
-    _add_arg(cmd, "--batch", hp, "batch")
-    _add_arg(cmd, "--stage1_epochs", hp, "stage1_epochs")
-    _add_arg(cmd, "--stage2_epochs", hp, "stage2_epochs")
-    _add_arg(cmd, "--loss_stage2", hp, "loss_stage2")
-
-    _add_arg(cmd, "--ecg_lam", hp, "ecg_lam")
-    _add_arg(cmd, "--ecg_tau", hp, "ecg_tau")
-    _add_arg(cmd, "--ecg_k", hp, "ecg_k")
-    _add_arg(cmd, "--ecg_conf_type", hp, "ecg_conf_type")
-    _add_arg(cmd, "--ecg_schedule", hp, "ecg_schedule")
-
-    (run_dir / "cmd.txt").write_text(" ".join(cmd) + "\n", encoding="utf-8")
-    (run_dir / "wandb_meta.txt").write_text(
-        f"project={os.environ.get('WANDB_PROJECT','')}\n"
-        f"entity={os.environ.get('WANDB_ENTITY','')}\n"
-        f"name={run_name}\n"
-        f"group={group}\n"
-        f"job_type={run_kind}\n"
-        f"tags={','.join(tags)}\n",
-        encoding="utf-8",
-    )
-
-    subprocess.run(cmd, check=True)
+    proc = subprocess.run(cmd)
+    return proc.returncode
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
