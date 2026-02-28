@@ -881,11 +881,14 @@ class dataset():
         # the shuffle needs to be false for the DataLoader to more easily store the IDs of wrong classified inputs 
         self.batch_size = batch_size
         self.batch_size_adv = batch_size_adv
-        
+
+        # Data root (PSC-friendly). Default keeps Colab behavior.
+        data_root = os.environ.get("CEGS_DATA_DIR", "../data")
+
         if dataset_name == "mnist":
             self.num_classes = 10
-            self.data_train = datasets.MNIST("../data", train=True, download=True, transform=transforms.ToTensor())
-            self.data_test = datasets.MNIST("../data", train=False, download=True, transform=transforms.ToTensor())
+            self.data_train = datasets.MNIST(data_root, train=True, download=True, transform=transforms.ToTensor())
+            self.data_test = datasets.MNIST(data_root, train=False, download=True, transform=transforms.ToTensor())
             self.data_val = self.data_test
 
 
@@ -940,8 +943,8 @@ class dataset():
                 transforms.ToTensor(),
                 transforms.Normalize(cifar10_mean, cifar10_std),])
 
-            self.data_train = datasets.CIFAR10("../data", train=True, download=True, transform=train_transform)
-            self.data_test = datasets.CIFAR10("../data", train=False, download=True, transform=test_transform)
+            self.data_train = datasets.CIFAR10(data_root, train=True, download=True, transform=train_transform)
+            self.data_test = datasets.CIFAR10(data_root, train=False, download=True, transform=test_transform)
             self.data_val = self.data_test
 
             self.train_loader = DataLoader(self.data_train,    batch_size = batch_size, shuffle=False) if batch_size > 0 else None
@@ -967,8 +970,8 @@ class dataset():
                 transforms.Normalize(cifar10_mean, cifar10_std),])
 
 
-            self.data_train = datasets.CIFAR10("../data", train=True, download=True, transform=train_transform)
-            self.data_val = datasets.CIFAR10("../data", train=False, download=True, transform=test_transform)
+            self.data_train = datasets.CIFAR10(data_root, train=True, download=True, transform=train_transform)
+            self.data_val = datasets.CIFAR10(data_root, train=False, download=True, transform=test_transform)
             self.data_test = CIFAR10C("../data", name='gaussian_noise', transform=test_transform)
             
             self.train_loader = DataLoader(self.data_train,    batch_size = batch_size, shuffle=False) if batch_size > 0 else None
@@ -1022,8 +1025,8 @@ class dataset():
                 transforms.ToTensor(),
                 transforms.Normalize(cifar100_mean, cifar100_std),])
 
-            self.data_train = datasets.CIFAR100("../data", train=True, download=True, transform=train_transform)
-            self.data_test = datasets.CIFAR100("../data", train=False, download=True, transform=test_transform)
+            self.data_train = datasets.CIFAR100(data_root, train=True, download=True, transform=train_transform)
+            self.data_test = datasets.CIFAR100(data_root, train=False, download=True, transform=test_transform)
             self.data_val = self.data_test
 
             self.train_loader = DataLoader(self.data_train,    batch_size = batch_size, shuffle=False) if batch_size > 0 else None
@@ -1036,8 +1039,8 @@ class dataset():
             self.num_classes = 1000
             if imageNet_original:
                 print("Original dataset")
-                traindir = '../data/imageNet/train'                
-                valdir = '../data/imageNet/val'                
+                traindir = os.path.join(data_root, 'imageNet', 'train')                
+                valdir = os.path.join(data_root, 'imageNet', 'val')                
                 crop_size = 224
 
                 normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
@@ -1055,7 +1058,7 @@ class dataset():
 
             else:
                 print("Downsampled dataset")
-                root_dir = '../data/imageNet/'
+                root_dir = os.path.join(data_root, 'imageNet') + '/'
 
                 resolution=64 
                 classes=1000
@@ -1079,8 +1082,8 @@ class dataset():
         elif dataset_name ==  "svhn":
             self.num_classes = 10
 
-            self.data_train = datasets.SVHN("../data", split='train', download=True, transform=transforms.ToTensor())
-            self.data_test = datasets.SVHN("../data", split='test', download=True, transform=transforms.ToTensor())
+            self.data_train = datasets.SVHN(data_root, split='train', download=True, transform=transforms.ToTensor())
+            self.data_test = datasets.SVHN(data_root, split='test', download=True, transform=transforms.ToTensor())
             self.data_val = self.data_test
             
             self.train_loader = DataLoader(self.data_train, batch_size = batch_size, shuffle=False, pin_memory=True,) if batch_size > 0 else None
