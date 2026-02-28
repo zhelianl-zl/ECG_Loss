@@ -14,11 +14,10 @@ What you get:
   If the project exists in W&B -> the run goes into it.
   If it doesn't exist -> W&B will create it automatically.
 
-- Will NOT overwrite WANDB_NAME / WANDB_GROUP if your sbatch already sets them
-  (so Slurm mapping j<job>_t<task> still works).
-  If sbatch doesn't set them, it falls back to notebook-style names.
+- Run name is clear + cancellable (contains job/task id):
+    <dataset>_s1-<e1>-<loss1>_s2-<e2>-<loss2>_pe-<pe>_j<arrayjob>_t<task>
 
-- Adds missing notebook-base args support via TSV columns:
+- Adds notebook-base args support via TSV columns:
   momentum, workers, half_prec, variants, type, pe_mode, loss_stage1,
   and all ecg_* schedule start/end fields.
 
@@ -230,9 +229,7 @@ def main() -> None:
     if not project:
         project = choose_wandb_project(dataset)
 
-    # Notebook-style defaults (used only if sbatch didn't already set them)
     total_epochs = stop_val or "T?"
-    default_name = f"{dataset}_{method_name}_s{seed}_T{total_epochs}"
     default_group = f"{dataset}_{run_kind}_s{seed}_T{total_epochs}"
 
     tags = [run_kind, dataset, f"s{seed}", method_name, f"T{total_epochs}"]
@@ -241,20 +238,40 @@ def main() -> None:
     if stage2:
         tags.append(f"s2{stage2}")
 
-    # W&B env: always set project (this is what you want)
+    # W&B env: always set project (exists -> use; not exists -> W&B creates)
     os.environ["WANDB_PROJECT"] = project
 
-    # do not override sbatch mapping if already present
-    if not os.environ.get("WANDB_NAME", "").strip():
-        wn = (hp.get("wandb_name") or "").strip()
-        os.environ["WANDB_NAME"] = wn if wn else default_name
+    # ---- Run name (clear + cancellable) ----
+    # Priority:
+    # 1) TSV per-row column "wandb_name" (explicit override)
+    # 2) Auto name:
+    #    <dataset>_s1-<e1>-<loss1>_s2-<e2>-<loss2>_pe-<pe>_j<arrayjob>_t<task>
+    tsv_wandb_name = (hp.get("wandb_name") or "").strip()
+    if tsv_wandb_name:
+        os.environ["WANDB_NAME"] = tsv_wandb_name
+    else:
+        array_job = os.environ.get("SLURM_ARRAY_JOB_ID") or os.environ.get("SLURM_JOB_ID") or "noj"
+        task_id = os.environ.get("SLURM_ARRAY_TASK_ID") or "0"
+        e1 = (hp.get("stage1_epochs") or "").strip()
+        e2 = (hp.get("stage2_epochs") or "").strip()
+        l1 = (hp.get("loss_stage1") or "").strip() or "none"
+        l2 = (hp.get("loss_stage2") or "").strip() or "none"
+        pe = (hp.get("pe_mode") or "").strip() or "none"
+        raw = f"{dataset}_s1-{e1}-{l1}_s2-{e2}-{l2}_pe-{pe}_j{array_job}_t{task_id}"
+        safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", raw)
+        os.environ["WANDB_NAME"] = safe[:180]
 
+    # Group: keep array grouping by default unless TSV provides one
     if not os.environ.get("WANDB_GROUP", "").strip():
         wg = (hp.get("wandb_group") or "").strip()
-        os.environ["WANDB_GROUP"] = wg if wg else default_group
+        if wg:
+            os.environ["WANDB_GROUP"] = wg
+        else:
+            array_job = os.environ.get("SLURM_ARRAY_JOB_ID") or os.environ.get("SLURM_JOB_ID") or "noj"
+            os.environ["WANDB_GROUP"] = f"j{array_job}"
 
-    if not os.environ.get("WANDB_JOB_TYPE", "").strip():
-        os.environ["WANDB_JOB_TYPE"] = run_kind
+    # Job type: run_kind (e.g., official/ablation)
+    os.environ["WANDB_JOB_TYPE"] = run_kind
 
     # merge tags with any existing tags from sbatch
     os.environ["WANDB_TAGS"] = _merge_tags(os.environ.get("WANDB_TAGS", ""), tags)
