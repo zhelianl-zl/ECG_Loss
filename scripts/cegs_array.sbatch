@@ -8,12 +8,29 @@
 set -euo pipefail
 umask 077
 
-BASE="${BASE:-$HOME/projects/cegs/ECG_Loss}"
+BASE="${BASE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 CONF="${CONF:-$BASE/sweeps/cifar100.tsv}"
 
 # Prefer DATA_DIR/RUNS_DIR exported by submit_array.sh
+# If not provided, default to Ocean project space when available (large quota).
 if [[ -z "${DATA_DIR:-}" || -z "${RUNS_DIR:-}" ]]; then
-  SCR="$HOME/scratch"
+  ACCT="${SLURM_JOB_ACCOUNT:-}"
+  OCEAN_USER_DIR=""
+  if [[ -n "$ACCT" && -d "/ocean/projects/$ACCT" ]]; then
+    OCEAN_USER_DIR="/ocean/projects/$ACCT/$USER"
+    mkdir -p "$OCEAN_USER_DIR" 2>/dev/null || true
+  fi
+
+  if [[ -n "$OCEAN_USER_DIR" && -d "$OCEAN_USER_DIR" && -w "$OCEAN_USER_DIR" ]]; then
+    SCR="$OCEAN_USER_DIR"
+  elif [[ -n "${SCRATCH:-}" && -d "$SCRATCH" ]]; then
+    SCR="$SCRATCH"
+  elif [[ -d "/scratch/$USER" ]]; then
+    SCR="/scratch/$USER"
+  else
+    SCR="$HOME/scratch"
+  fi
+
   DATA_DIR="${DATA_DIR:-$SCR/cegs_data}"
   RUNS_DIR="${RUNS_DIR:-$SCR/cegs_runs}"
 fi

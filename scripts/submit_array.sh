@@ -53,15 +53,29 @@ fi
 
 N=$(( ${#LINES[@]} - 1 ))   # exclude header
 
-# Robust scratch fallback (login nodes may not define $SCRATCH)
-if [[ -d "$HOME/scratch" ]]; then
-  SCR="$HOME/scratch"
-elif [[ -n "${SCRATCH:-}" ]]; then
+# Robust workspace selection
+# Preference order:
+# 1) Ocean project space (large quota) if available/writable
+# 2) $SCRATCH (if set by system)
+# 3) /scratch/$USER (if exists)
+# 4) $HOME/scratch (fallback)
+OCEAN_ROOT="/ocean/projects/${ACCOUNT}"
+OCEAN_USER_DIR="${OCEAN_ROOT}/${USER}"
+
+if [[ -d "$OCEAN_ROOT" ]]; then
+  mkdir -p "$OCEAN_USER_DIR" 2>/dev/null || true
+fi
+
+if [[ -d "$OCEAN_USER_DIR" && -w "$OCEAN_USER_DIR" ]]; then
+  SCR="$OCEAN_USER_DIR"
+elif [[ -n "${SCRATCH:-}" && -d "$SCRATCH" ]]; then
   SCR="$SCRATCH"
 elif [[ -d "/scratch/$USER" ]]; then
   SCR="/scratch/$USER"
-else
+elif [[ -d "$HOME/scratch" ]]; then
   SCR="$HOME/scratch"
+else
+  SCR="$HOME"
 fi
 
 export BASE CONF
