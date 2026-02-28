@@ -27,13 +27,24 @@ if [[ -f "$WCFG" ]]; then
   source "$WCFG"
 fi
 
-# Count tasks: first non-empty line is header; ignore later full-line comments
+# Count tasks robustly:
+# - allow top meta directives like: #wandb_project=...
+# - ignore full-line comments anywhere
+# - header is the first non-comment line (or a commented header starting with #dataset\t...)
 N=$(awk '
-  BEGIN{seen=0; n=0}
+  BEGIN{header_seen=0; n=0}
   /^[[:space:]]*$/ {next}
+
+  # full-line comments
+  /^[[:space:]]*#/ {
+    # treat a commented header like "#dataset\tseed..." as header
+    if (header_seen==0 && $0 ~ /^[[:space:]]*#dataset[[:space:]]*\t/) header_seen=1
+    next
+  }
+
+  # first non-comment line is header
   {
-    if (seen==0) {seen=1; next}     # header
-    if ($0 ~ /^[[:space:]]*#/) next # skip comments
+    if (header_seen==0) {header_seen=1; next}
     n++
   }
   END{print n}
