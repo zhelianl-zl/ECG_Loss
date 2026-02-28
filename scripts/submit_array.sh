@@ -22,7 +22,7 @@ fi
 
 # ---- clean/archive old slurm logs to keep repo clean ----
 mkdir -p "$BASE/slurm_logs"
-mv "$BASE"/slurm_*.out "$BASE"/slurm_*.err "$BASE/slurm_logs/" 2>/dev/null || true
+mv "$BASE"/slurm_*.out "$BASE"/slurm_*.err "$BASE"/slurm_logs/" 2>/dev/null || true
 # ---------------------------------------------------------
 
 # ---- load wandb config file (optional) ----
@@ -54,11 +54,6 @@ fi
 N=$(( ${#LINES[@]} - 1 ))   # exclude header
 
 # Robust workspace selection
-# Preference order:
-# 1) Ocean project space (large quota) if available/writable
-# 2) $SCRATCH (if set by system)
-# 3) /scratch/$USER (if exists)
-# 4) $HOME/scratch (fallback)
 OCEAN_ROOT="/ocean/projects/${ACCOUNT}"
 OCEAN_USER_DIR="${OCEAN_ROOT}/${USER}"
 
@@ -101,6 +96,7 @@ echo
 SUBMIT_OUT=$(sbatch \
   -A "$ACCOUNT" \
   -p "$PARTITION" \
+  --export=ALL \
   --qos="$QOS" \
   --gres="$GRES" \
   -t "$TIME" \
