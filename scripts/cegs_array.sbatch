@@ -18,10 +18,11 @@ if [[ -z "${DATA_DIR:-}" || -z "${RUNS_DIR:-}" ]]; then
   RUNS_DIR="${RUNS_DIR:-$SCR/cegs_runs}"
 fi
 
-mkdir -p "$BASE/slurm_logs" "$DATA_DIR" "$RUNS_DIR"
+WANDB_MODE="${WANDB_MODE:-offline}"
+AUTO_DOWNLOAD="${CEGS_AUTO_DOWNLOAD:-1}"
 
 RUN="$RUNS_DIR/${SLURM_JOB_NAME}_${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
-mkdir -p "$RUN"
+mkdir -p "$RUN" "$DATA_DIR" "$RUNS_DIR"
 
 # per-run logs
 exec > >(tee -a "$RUN/out.log") 2> >(tee -a "$RUN/err.log" >&2)
@@ -49,35 +50,29 @@ echo "COMMIT=$COMMIT"
 ln -sfn "$DATA_DIR" "$RUN/data"
 
 export CEGS_DATA_DIR="$DATA_DIR"
-export CEGS_AUTO_DOWNLOAD="${CEGS_AUTO_DOWNLOAD:-1}"
+export CEGS_AUTO_DOWNLOAD="$AUTO_DOWNLOAD"
+
+# W&B isolation per task
+mkdir -p "$RUN/wandb"
+chmod 700 "$RUN/wandb" 2>/dev/null || true
+export WANDB_DIR="$RUN/wandb"
+export WANDB_MODE="$WANDB_MODE"
+export WANDB_ENTITY="${WANDB_ENTITY:-}"
+export WANDB_PROJECT_DEFAULT="${WANDB_PROJECT_DEFAULT:-CEGS}"
+export WANDB_JOB_TYPE_DEFAULT="${WANDB_JOB_TYPE_DEFAULT:-official}"
+# Make W&B run name map 1:1 to Slurm array task
+# In W&B you will see: j<array_jobid>_t<taskid>
+# Then you can cancel it with: scancel <array_jobid>_<taskid>
+export WANDB_GROUP="${WANDB_GROUP:-j${SLURM_ARRAY_JOB_ID}}"
+export WANDB_NAME="${WANDB_NAME:-j${SLURM_ARRAY_JOB_ID}_t${SLURM_ARRAY_TASK_ID}}"
+# Optional: add Slurm identifiers into tags for filtering
+export WANDB_TAGS="${WANDB_TAGS:-},slurm,job${SLURM_JOB_ID},array${SLURM_ARRAY_JOB_ID},task${SLURM_ARRAY_TASK_ID}"
 
 # Activate conda env (Python 3.10)
 source "$HOME/miniconda3/etc/profile.d/conda.sh"
 conda activate cegs
 unset LD_PRELOAD || true
 python -V
-
-# Load W&B config (so job gets the same routing as submit script)
-if [[ -f "$BASE/configs/wandb.env" ]]; then
-  # shellcheck disable=SC1091
-  source "$BASE/configs/wandb.env"
-fi
-
-# Auto fallback: if compute node can't reach W&B, switch to offline (training continues)
-if [[ "${WANDB_MODE:-online}" == "online" ]]; then
-  python - <<'PY' || export WANDB_MODE="offline"
-import socket
-socket.setdefaulttimeout(2.0)
-socket.create_connection(("api.wandb.ai", 443))
-print("wandb network ok")
-PY
-fi
-echo "WANDB_MODE=$WANDB_MODE"
-
-# W&B isolation per task (never mix runs)
-mkdir -p "$RUN/wandb"
-chmod 700 "$RUN/wandb" 2>/dev/null || true
-export WANDB_DIR="$RUN/wandb"
 
 cd "$RUN/src"
 python -u tools/run_from_tsv.py \
