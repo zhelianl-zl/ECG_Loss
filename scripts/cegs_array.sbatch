@@ -8,7 +8,10 @@
 set -euo pipefail
 umask 077
 
-BASE="${BASE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+# Resolve repo root robustly even when Slurm runs a staged copy of this script under /var/spool/slurm/...
+# Priority: BASE from environment -> SLURM_SUBMIT_DIR (original submission directory) -> current working directory.
+BASE="${BASE:-${SLURM_SUBMIT_DIR:-$PWD}}"
+BASE="$(cd "$BASE" && pwd)"
 CONF="${CONF:-$BASE/sweeps/cifar100.tsv}"
 
 # Prefer DATA_DIR/RUNS_DIR exported by submit_array.sh
@@ -29,14 +32,16 @@ if [[ -z "${DATA_DIR:-}" || -z "${RUNS_DIR:-}" ]]; then
     SCR="/scratch/$USER"
   else
     SCR="$HOME/scratch"
+    mkdir -p "$SCR" 2>/dev/null || true
   fi
 
   DATA_DIR="${DATA_DIR:-$SCR/cegs_data}"
   RUNS_DIR="${RUNS_DIR:-$SCR/cegs_runs}"
 fi
 
-WANDB_MODE="${WANDB_MODE:-offline}"
 AUTO_DOWNLOAD="${CEGS_AUTO_DOWNLOAD:-1}"
+
+mkdir -p "$RUNS_DIR" "$DATA_DIR"
 
 RUN="$RUNS_DIR/${SLURM_JOB_NAME}_${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
 mkdir -p "$RUN" "$DATA_DIR" "$RUNS_DIR"
@@ -51,7 +56,7 @@ echo "DATA_DIR=$DATA_DIR"
 echo "HOST=$(hostname)"
 echo "START=$(date -Iseconds)"
 
-# Snapshot code
+# Snapshot code (copy repo into run folder)
 rsync -a --delete \
   --exclude '.git' --exclude '.venv' --exclude '__pycache__' \
   --exclude 'logs' --exclude 'models' --exclude 'wandb' \
@@ -63,7 +68,7 @@ COMMIT="$(cd "$BASE" && git rev-parse --short HEAD)"
 echo "$COMMIT" > "$RUN/commit.txt"
 echo "COMMIT=$COMMIT"
 
-# Make ../data (relative to RUN/src) point to shared DATA_DIR
+# Make ../data point to shared DATA_DIR
 ln -sfn "$DATA_DIR" "$RUN/data"
 
 export CEGS_DATA_DIR="$DATA_DIR"
@@ -73,16 +78,14 @@ export CEGS_AUTO_DOWNLOAD="$AUTO_DOWNLOAD"
 mkdir -p "$RUN/wandb"
 chmod 700 "$RUN/wandb" 2>/dev/null || true
 export WANDB_DIR="$RUN/wandb"
-export WANDB_MODE="$WANDB_MODE"
+export WANDB_MODE="${WANDB_MODE:-online}"
 export WANDB_ENTITY="${WANDB_ENTITY:-}"
 export WANDB_PROJECT_DEFAULT="${WANDB_PROJECT_DEFAULT:-CEGS}"
 export WANDB_JOB_TYPE_DEFAULT="${WANDB_JOB_TYPE_DEFAULT:-official}"
+
 # Make W&B run name map 1:1 to Slurm array task
-# In W&B you will see: j<array_jobid>_t<taskid>
-# Then you can cancel it with: scancel <array_jobid>_<taskid>
 export WANDB_GROUP="${WANDB_GROUP:-j${SLURM_ARRAY_JOB_ID}}"
 export WANDB_NAME="${WANDB_NAME:-j${SLURM_ARRAY_JOB_ID}_t${SLURM_ARRAY_TASK_ID}}"
-# Optional: add Slurm identifiers into tags for filtering
 export WANDB_TAGS="${WANDB_TAGS:-},slurm,job${SLURM_JOB_ID},array${SLURM_ARRAY_JOB_ID},task${SLURM_ARRAY_TASK_ID}"
 
 # Activate conda env (Python 3.10)
