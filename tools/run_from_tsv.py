@@ -241,25 +241,57 @@ def main() -> None:
     # W&B env: always set project (exists -> use; not exists -> W&B creates)
     os.environ["WANDB_PROJECT"] = project
 
-    # ---- Run name (clear + cancellable) ----
+    # ---- Run name (clear + cancellable + includes ECG hyperparams) ----
     # Priority:
     # 1) TSV per-row column "wandb_name" (explicit override)
     # 2) Auto name:
-    #    <dataset>_s1-<e1>-<loss1>_s2-<e2>-<loss2>_pe-<pe>_j<arrayjob>_t<task>
+    #    <dataset>_s1-<e1>-<loss1>_s2-<e2>-<loss2>_pe-<pe>_sch-<sch>_lam<...>_tau<...>_k<...>_j<arrayjob>_t<task>
     tsv_wandb_name = (hp.get("wandb_name") or "").strip()
     if tsv_wandb_name:
         os.environ["WANDB_NAME"] = tsv_wandb_name
     else:
         array_job = os.environ.get("SLURM_ARRAY_JOB_ID") or os.environ.get("SLURM_JOB_ID") or "noj"
         task_id = os.environ.get("SLURM_ARRAY_TASK_ID") or "0"
+
         e1 = (hp.get("stage1_epochs") or "").strip()
         e2 = (hp.get("stage2_epochs") or "").strip()
         l1 = (hp.get("loss_stage1") or "").strip() or "none"
         l2 = (hp.get("loss_stage2") or "").strip() or "none"
         pe = (hp.get("pe_mode") or "").strip() or "none"
-        raw = f"{dataset}_s1-{e1}-{l1}_s2-{e2}-{l2}_pe-{pe}_j{array_job}_t{task_id}"
+
+        sch = (hp.get("ecg_schedule") or "").strip() or "none"
+
+        # Prefer start/end if provided; else fallback to constant params.
+        lam_s = (hp.get("ecg_lam_start") or "").strip()
+        lam_e = (hp.get("ecg_lam_end") or "").strip()
+        lam_c = (hp.get("ecg_lam") or "").strip()
+        lam_part = f"{lam_s}-{lam_e}" if (lam_s and lam_e) else (lam_c if lam_c else "na")
+
+        tau_s = (hp.get("ecg_tau_start") or "").strip()
+        tau_e = (hp.get("ecg_tau_end") or "").strip()
+        tau_c = (hp.get("ecg_tau") or "").strip()
+        tau_part = f"{tau_s}-{tau_e}" if (tau_s and tau_e) else (tau_c if tau_c else "na")
+
+        k_s = (hp.get("ecg_k_start") or "").strip()
+        k_e = (hp.get("ecg_k_end") or "").strip()
+        k_c = (hp.get("ecg_k") or "").strip()
+        k_part = f"{k_s}-{k_e}" if (k_s and k_e) else (k_c if k_c else "na")
+
+        raw = (
+            f"{dataset}"
+            f"_s1-{e1}-{l1}"
+            f"_s2-{e2}-{l2}"
+            f"_pe-{pe}"
+            f"_sch-{sch}"
+            f"_lam{lam_part}"
+            f"_tau{tau_part}"
+            f"_k{k_part}"
+            f"_j{array_job}_t{task_id}"
+        )
+
+        # sanitize to W&B-safe name
         safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", raw)
-        os.environ["WANDB_NAME"] = safe[:180]
+        os.environ["WANDB_NAME"] = safe[:200]
 
     # Group: keep array grouping by default unless TSV provides one
     if not os.environ.get("WANDB_GROUP", "").strip():
