@@ -88,6 +88,10 @@ export WANDB_GROUP="${WANDB_GROUP:-j${SLURM_ARRAY_JOB_ID}}"
 export WANDB_NAME="${WANDB_NAME:-j${SLURM_ARRAY_JOB_ID}_t${SLURM_ARRAY_TASK_ID}}"
 export WANDB_TAGS="${WANDB_TAGS:-},slurm,job${SLURM_JOB_ID},array${SLURM_ARRAY_JOB_ID},task${SLURM_ARRAY_TASK_ID}"
 
+#Make re
+export CUBLAS_WORKSPACE_CONFIG=:4096:8
+export PYTHONHASHSEED=0
+
 # Activate conda env (Python 3.10)
 source "$HOME/miniconda3/etc/profile.d/conda.sh"
 conda activate cegs
