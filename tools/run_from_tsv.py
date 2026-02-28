@@ -1,3 +1,31 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+run_from_tsv.py (patched)
+
+What you get:
+- TSV supports setting W&B project like your notebook:
+    1) Top-of-file directive (applies to all rows):
+         #wandb_project=ecg-loss
+       or  #wandb_project: ecg-loss
+    2) Per-row column "wandb_project" (overrides the directive)
+
+  If the project exists in W&B -> the run goes into it.
+  If it doesn't exist -> W&B will create it automatically.
+
+- Will NOT overwrite WANDB_NAME / WANDB_GROUP if your sbatch already sets them
+  (so Slurm mapping j<job>_t<task> still works).
+  If sbatch doesn't set them, it falls back to notebook-style names.
+
+- Adds missing notebook-base args support via TSV columns:
+  momentum, workers, half_prec, variants, type, pe_mode, loss_stage1,
+  and all ecg_* schedule start/end fields.
+
+Expected CLI (kept compatible with your sbatch):
+  python run_from_tsv.py --conf sweeps/universal.tsv --idx $SLURM_ARRAY_TASK_ID --run_dir ... --commit ...
+"""
+
 import argparse
 import os
 import re
@@ -8,39 +36,41 @@ from typing import List, Dict, Optional, Tuple
 
 
 # -----------------------------
-# TSV parsing with meta support
+# TSV parsing (with meta support)
 # -----------------------------
-# Supported meta directives (full-line comments):
-#   #wandb_project=ecg-loss
-#   #wandb_project: ecg-loss
-#
-# Header line:
-#   dataset\tseed\t...
-# Header can be commented as:
-#   #dataset\tseed\t...
-#
-# Data rows: non-empty, non-comment lines after header.
-# Full-line comments anywhere are ignored.
-
-
 def _parse_tsv_with_meta(conf_path: Path) -> Tuple[List[str], List[str], Dict[str, str]]:
+    """
+    Returns (header_fields, data_lines, meta)
+
+    Meta directives (full-line comments only):
+      #wandb_project=xxx
+      #wandb_project: xxx
+
+    Header:
+      dataset\tseed\t...
+    Header can be commented:
+      #dataset\tseed\t...
+
+    All other full-line comments are ignored.
+    Inline comments (end-of-line #...) are NOT supported.
+    """
     raw_lines = conf_path.read_text(encoding="utf-8").splitlines()
 
     meta: Dict[str, str] = {}
-    header: Optional[str] = None
-    data: List[str] = []
+    header_line: Optional[str] = None
+    data_lines: List[str] = []
 
     for ln in raw_lines:
         s = ln.strip()
         if not s:
             continue
 
-        # comment line
+        # full-line comment
         if s.lstrip().startswith("#"):
-            t = s.lstrip()[1:].strip()  # after '#'
+            t = s.lstrip()[1:].strip()
             tl = t.lower()
 
-            # meta: wandb_project
+            # meta directive
             if tl.startswith("wandb_project=") or tl.startswith("wandb_project:"):
                 if "=" in t:
                     meta["wandb_project"] = t.split("=", 1)[1].strip()
@@ -49,28 +79,26 @@ def _parse_tsv_with_meta(conf_path: Path) -> Tuple[List[str], List[str], Dict[st
                 continue
 
             # allow commented header like "#dataset\tseed\t..."
-            if header is None and t.lower().startswith("dataset\t"):
-                header = t
-            # ignore other comments
+            if header_line is None and t.lower().startswith("dataset\t"):
+                header_line = t
             continue
 
         # non-comment line
-        if header is None:
-            header = s.lstrip("#").strip()
+        if header_line is None:
+            header_line = s.lstrip("#").strip()
         else:
-            data.append(s)
+            data_lines.append(s)
 
-    if header is None:
+    if header_line is None:
         return [], [], meta
-    return [header], data, meta
+    header_fields = header_line.split("\t")
+    return header_fields, data_lines, meta
 
 
 def read_tsv_row(conf_path: Path, idx: int) -> Tuple[Dict[str, str], Dict[str, str]]:
-    header_lines, data_lines, meta = _parse_tsv_with_meta(conf_path)
-    if len(header_lines) < 1 or len(data_lines) < 1:
+    header, data_lines, meta = _parse_tsv_with_meta(conf_path)
+    if len(header) == 0 or len(data_lines) == 0:
         raise RuntimeError(f"{conf_path} must have a header + at least one data row")
-
-    header = header_lines[0].split("\t")
 
     if idx < 0 or idx >= len(data_lines):
         raise RuntimeError(f"idx {idx} out of range for {conf_path} (rows={len(data_lines)})")
@@ -146,30 +174,29 @@ def _add_arg(cmd: List[str], flag: str, hp: Dict[str, str], key: str, default: O
 def _add_flag(cmd: List[str], hp: Dict[str, str], key: str) -> None:
     """
     Add a boolean flag (e.g. --force_run) if TSV column value is truthy.
-    Truthy: 1/true/True/yes/y
+    Truthy: 1/true/yes/y
     """
     v = str(hp.get(key, "")).strip().lower()
     if v in {"1", "true", "yes", "y"}:
         cmd.append(f"--{key}")
 
 
+def _merge_tags(existing: str, new_tags: List[str]) -> str:
+    ex = [t.strip() for t in (existing or "").split(",") if t.strip()]
+    out = ex[:]
+    for t in new_tags:
+        if t and t not in out:
+            out.append(t)
+    return ",".join(out)
+
+
 def choose_wandb_project(dataset: str) -> str:
     ds = (dataset or "").strip().lower()
-    ds_key = re.sub(r"[^a-z0-9]+", "_", ds).strip("_")  # cifar100, svhn, cifar10...
-    # allow either lower or upper key in env
+    ds_key = re.sub(r"[^a-z0-9]+", "_", ds).strip("_")
     for k in (f"WANDB_PROJECT_{ds_key}", f"WANDB_PROJECT_{ds_key.upper()}"):
         if k in os.environ and os.environ[k].strip():
             return os.environ[k].strip()
     return os.environ.get("WANDB_PROJECT_DEFAULT", "CEGS").strip()
-
-
-def _merge_tags(existing: str, new_tags: List[str]) -> str:
-    ex = [t.strip() for t in (existing or "").split(",") if t.strip()]
-    merged = ex[:]
-    for t in new_tags:
-        if t and t not in merged:
-            merged.append(t)
-    return ",".join(merged)
 
 
 def main() -> None:
@@ -189,51 +216,45 @@ def main() -> None:
     dataset_raw = hp.get("dataset", "").strip()
     dataset = normalize_dataset_name(dataset_raw)
     seed = hp.get("seed", "0").strip()
-
     stop_val = hp.get("stop_val", "").strip()
     stage1 = hp.get("stage1_epochs", "").strip()
     stage2 = hp.get("stage2_epochs", "").strip()
 
-    # method/run_kind (optional columns; otherwise inferred)
+    # method/run_kind (optional columns)
     method_name = (hp.get("method_name") or hp.get("loss_stage2") or "exp").strip()
     run_kind = (hp.get("run_kind") or os.environ.get("WANDB_JOB_TYPE_DEFAULT", "official")).strip()
 
-    # pick W&B project:
-    # priority: per-row column -> meta directive -> old mapping by dataset
+    # --- W&B project selection ---
+    # Priority: per-row -> TSV meta directive -> env mapping by dataset
     project = (hp.get("wandb_project") or meta.get("wandb_project") or "").strip()
     if not project:
         project = choose_wandb_project(dataset)
 
-    # notebook-style naming (used only if sbatch didn't already set WANDB_NAME/GROUP)
+    # Notebook-style defaults (used only if sbatch didn't already set them)
     total_epochs = stop_val or "T?"
-    run_name_default = f"{dataset}_{method_name}_s{seed}_T{total_epochs}"
-    group_default = f"{dataset}_{run_kind}_s{seed}_T{total_epochs}"
+    default_name = f"{dataset}_{method_name}_s{seed}_T{total_epochs}"
+    default_group = f"{dataset}_{run_kind}_s{seed}_T{total_epochs}"
 
-    tags = [
-        run_kind, dataset, f"s{seed}", method_name,
-        f"T{total_epochs}",
-    ]
+    tags = [run_kind, dataset, f"s{seed}", method_name, f"T{total_epochs}"]
     if stage1:
         tags.append(f"s1{stage1}")
     if stage2:
         tags.append(f"s2{stage2}")
 
-    # W&B env
+    # W&B env: always set project (this is what you want)
     os.environ["WANDB_PROJECT"] = project
-    if os.environ.get("WANDB_ENTITY", "").strip():
-        os.environ["WANDB_ENTITY"] = os.environ["WANDB_ENTITY"].strip()
 
-    # IMPORTANT: if sbatch already set WANDB_NAME/GROUP for Slurm mapping, keep them.
+    # do not override sbatch mapping if already present
     if not os.environ.get("WANDB_NAME", "").strip():
-        # allow TSV override
         wn = (hp.get("wandb_name") or "").strip()
-        os.environ["WANDB_NAME"] = wn if wn else run_name_default
+        os.environ["WANDB_NAME"] = wn if wn else default_name
 
     if not os.environ.get("WANDB_GROUP", "").strip():
         wg = (hp.get("wandb_group") or "").strip()
-        os.environ["WANDB_GROUP"] = wg if wg else group_default
+        os.environ["WANDB_GROUP"] = wg if wg else default_group
 
-    os.environ["WANDB_JOB_TYPE"] = os.environ.get("WANDB_JOB_TYPE", "").strip() or run_kind
+    if not os.environ.get("WANDB_JOB_TYPE", "").strip():
+        os.environ["WANDB_JOB_TYPE"] = run_kind
 
     # merge tags with any existing tags from sbatch
     os.environ["WANDB_TAGS"] = _merge_tags(os.environ.get("WANDB_TAGS", ""), tags)
@@ -242,50 +263,52 @@ def main() -> None:
     # data root
     data_root = Path(os.environ.get("CEGS_DATA_DIR", str(run_dir / "data"))).expanduser().resolve()
     auto_download = os.environ.get("CEGS_AUTO_DOWNLOAD", "1") not in ("0", "false", "False")
-    ensure_dataset(data_root, dataset, auto_download)
+    ensure_dataset(data_root, dataset, auto_download=auto_download)
 
-    # build train command
-    cmd = ["python", "train.py"]
+    # build train.py cmd
+    cmd: List[str] = ["python", "-u", "train.py"]
 
-    # core training args
-    _add_arg(cmd, "--type", hp, "type")                  # std / robust
-    _add_arg(cmd, "--alg", hp, "alg")                    # pgd / fgsm ...
-    _add_arg(cmd, "--ratio_adv", hp, "ratio_adv")
-    _add_arg(cmd, "--ratio", hp, "ratio")
-    _add_arg(cmd, "--epsilon", hp, "epsilon")
-    _add_arg(cmd, "--num_iter", hp, "num_iter")
-    _add_arg(cmd, "--alpha", hp, "alpha")
-
+    # core training args (notebook base_args compatible)
+    _add_arg(cmd, "--type", hp, "type")
     _add_arg(cmd, "--dataset", {"dataset": dataset}, "dataset")
-    _add_arg(cmd, "--stop", hp, "stop")
+    _add_arg(cmd, "--seed", hp, "seed")
+    _add_arg(cmd, "--stop", hp, "stop", "epochs")
     _add_arg(cmd, "--stop_val", hp, "stop_val")
     _add_arg(cmd, "--lr", hp, "lr")
-    _add_arg(cmd, "--momentum", hp, "momentum")          # NOTE: notebook uses 0.9
+    _add_arg(cmd, "--momentum", hp, "momentum")
     _add_arg(cmd, "--batch", hp, "batch")
     _add_arg(cmd, "--workers", hp, "workers")
     _add_arg(cmd, "--half_prec", hp, "half_prec")
     _add_arg(cmd, "--variants", hp, "variants")
     _add_arg(cmd, "--pe_mode", hp, "pe_mode")
 
-    _add_arg(cmd, "--seed", hp, "seed")
+    # adversarial / robust knobs (optional)
+    _add_arg(cmd, "--alg", hp, "alg")
+    _add_arg(cmd, "--ratio_adv", hp, "ratio_adv")
+    _add_arg(cmd, "--ratio", hp, "ratio")
+    _add_arg(cmd, "--epsilon", hp, "epsilon")
+    _add_arg(cmd, "--num_iter", hp, "num_iter")
+    _add_arg(cmd, "--alpha", hp, "alpha")
 
-    # 2-stage
+    # 2-stage controls
     _add_arg(cmd, "--stage1_epochs", hp, "stage1_epochs")
     _add_arg(cmd, "--stage2_epochs", hp, "stage2_epochs")
     _add_arg(cmd, "--loss_stage1", hp, "loss_stage1")
     _add_arg(cmd, "--loss_stage2", hp, "loss_stage2")
-    _add_flag(cmd, hp, "full_ecg")       # column full_ecg True/1 to enable
-    _add_flag(cmd, hp, "force_run")      # column force_run True/1 to enable
+    _add_flag(cmd, hp, "full_ecg")
+    _add_flag(cmd, hp, "force_run")
 
-    # ECG/CEGS params (constants)
-    _add_arg(cmd, "--ecg_lam", hp, "ecg_lam")
-    _add_arg(cmd, "--ecg_tau", hp, "ecg_tau")
-    _add_arg(cmd, "--ecg_k", hp, "ecg_k")
+    # ECG/CEGS params
     _add_arg(cmd, "--ecg_conf_type", hp, "ecg_conf_type")
     _add_arg(cmd, "--ecg_detach_gates", hp, "ecg_detach_gates")
     _add_arg(cmd, "--ecg_schedule", hp, "ecg_schedule")
 
-    # ECG schedules (start/end)
+    # constants (optional)
+    _add_arg(cmd, "--ecg_lam", hp, "ecg_lam")
+    _add_arg(cmd, "--ecg_tau", hp, "ecg_tau")
+    _add_arg(cmd, "--ecg_k", hp, "ecg_k")
+
+    # schedules (start/end)
     _add_arg(cmd, "--ecg_lam_start", hp, "ecg_lam_start")
     _add_arg(cmd, "--ecg_lam_end", hp, "ecg_lam_end")
     _add_arg(cmd, "--ecg_tau_start", hp, "ecg_tau_start")
@@ -303,10 +326,10 @@ def main() -> None:
     _add_arg(cmd, "--ecg_tau_min", hp, "ecg_tau_min")
     _add_arg(cmd, "--ecg_tau_max", hp, "ecg_tau_max")
 
-    # record
+    # record for debugging
     (run_dir / "cmd.txt").write_text(" ".join(cmd) + "\n", encoding="utf-8")
     (run_dir / "wandb_meta.txt").write_text(
-        f"project={project}\nentity={os.environ.get('WANDB_ENTITY','')}\nname={os.environ.get('WANDB_NAME','')}\n"
+        f"project={project}\nname={os.environ.get('WANDB_NAME','')}\n"
         f"group={os.environ.get('WANDB_GROUP','')}\njob_type={os.environ.get('WANDB_JOB_TYPE','')}\n"
         f"tags={os.environ.get('WANDB_TAGS','')}\n",
         encoding="utf-8",
