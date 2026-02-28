@@ -20,44 +20,33 @@ if [[ ! -f "$CONF" ]]; then
   exit 2
 fi
 
-# ---- clean/archive old slurm logs to keep repo clean ----
-mkdir -p "$BASE/slurm_logs"
-mv "$BASE"/slurm_*.out "$BASE"/slurm_*.err "$BASE"/slurm_logs/" 2>/dev/null || true
-# ---------------------------------------------------------
-
-# ---- load wandb config file (optional) ----
+# Load wandb config if exists
 WCFG="${WANDB_CONFIG:-$BASE/configs/wandb.env}"
 if [[ -f "$WCFG" ]]; then
   # shellcheck disable=SC1090
   source "$WCFG"
 fi
-# ---------------------------------------------------------
 
-# Count tasks robustly:
-# - Treat FIRST non-empty line as header (even if it starts with '#dataset')
-# - Ignore later comment lines starting with '#'
-mapfile -t LINES < <(awk '
-  BEGIN{seen=0}
+# Count tasks: first non-empty line is header; ignore later full-line comments
+N=$(awk '
+  BEGIN{seen=0; n=0}
   /^[[:space:]]*$/ {next}
   {
-    if (seen==0) {print; seen=1; next}
-    if ($0 ~ /^[[:space:]]*#/) next
-    print
+    if (seen==0) {seen=1; next}     # header
+    if ($0 ~ /^[[:space:]]*#/) next # skip comments
+    n++
   }
+  END{print n}
 ' "$CONF")
 
-if (( ${#LINES[@]} < 2 )); then
+if [[ "$N" -le 0 ]]; then
   echo "ERROR: TSV must have header + >=1 data row: $CONF" >&2
   exit 2
 fi
 
-N=$(( ${#LINES[@]} - 1 ))   # exclude header
-
-# Robust workspace selection
-OCEAN_ROOT="/ocean/projects/${ACCOUNT}"
-OCEAN_USER_DIR="${OCEAN_ROOT}/${USER}"
-
-if [[ -d "$OCEAN_ROOT" ]]; then
+# Choose workspace root (prefer Ocean)
+OCEAN_USER_DIR="/ocean/projects/${ACCOUNT}/${USER}"
+if [[ -d "/ocean/projects/${ACCOUNT}" ]]; then
   mkdir -p "$OCEAN_USER_DIR" 2>/dev/null || true
 fi
 
@@ -67,22 +56,21 @@ elif [[ -n "${SCRATCH:-}" && -d "$SCRATCH" ]]; then
   SCR="$SCRATCH"
 elif [[ -d "/scratch/$USER" ]]; then
   SCR="/scratch/$USER"
-elif [[ -d "$HOME/scratch" ]]; then
-  SCR="$HOME/scratch"
 else
-  SCR="$HOME"
+  SCR="$HOME/scratch"
+  mkdir -p "$SCR" 2>/dev/null || true
 fi
 
 export BASE CONF
 export DATA_DIR="${DATA_DIR:-$SCR/cegs_data}"
 export RUNS_DIR="${RUNS_DIR:-$SCR/cegs_runs}"
-export WANDB_MODE="${WANDB_MODE:-${WANDB_MODE:-offline}}"
+
+mkdir -p "$BASE/slurm_logs" "$DATA_DIR" "$RUNS_DIR" || true
+
+export WANDB_MODE="${WANDB_MODE:-offline}"
 export WANDB_ENTITY="${WANDB_ENTITY:-}"
 export WANDB_PROJECT_DEFAULT="${WANDB_PROJECT_DEFAULT:-CEGS}"
 export WANDB_JOB_TYPE_DEFAULT="${WANDB_JOB_TYPE_DEFAULT:-official}"
-
-mkdir -p "$DATA_DIR" "$RUNS_DIR" "$BASE/slurm_logs" || true
-chmod 700 "$DATA_DIR" "$RUNS_DIR" 2>/dev/null || true
 
 echo "BASE=$BASE"
 echo "CONF=$CONF"
@@ -90,21 +78,16 @@ echo "Tasks=$N  MaxParallel=$MAX_PARALLEL"
 echo "ACCOUNT=$ACCOUNT PARTITION=$PARTITION QOS=$QOS GRES=$GRES TIME=$TIME"
 echo "DATA_DIR=$DATA_DIR"
 echo "RUNS_DIR=$RUNS_DIR"
-echo "WANDB_MODE=$WANDB_MODE WANDB_ENTITY=${WANDB_ENTITY:-<default>} WANDB_PROJECT_DEFAULT=$WANDB_PROJECT_DEFAULT"
+echo "WANDB_MODE=$WANDB_MODE WANDB_ENTITY=${WANDB_ENTITY:-<empty>} WANDB_PROJECT_DEFAULT=$WANDB_PROJECT_DEFAULT"
 echo
 
-SUBMIT_OUT=$(sbatch \
+# IMPORTANT: --export=ALL ensures BASE/CONF/DATA_DIR/RUNS_DIR propagate to compute nodes
+sbatch \
   -A "$ACCOUNT" \
   -p "$PARTITION" \
-  --export=ALL \
   --qos="$QOS" \
   --gres="$GRES" \
   -t "$TIME" \
+  --export=ALL \
   --array="0-$((N-1))%${MAX_PARALLEL}" \
-  "$SBATCH_SCRIPT" 2>&1) || {
-    echo "ERROR: sbatch failed:" >&2
-    echo "$SUBMIT_OUT" >&2
-    exit 3
-  }
-
-echo "$SUBMIT_OUT"
+  "$SBATCH_SCRIPT"
