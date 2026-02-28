@@ -1,0 +1,4 @@
+#wandb_project=ecg_binary_fast
+dataset	seed	stop	stop_val	lr	momentum	batch	workers	half_prec	variants	type	pe_mode	stage1_epochs	stage2_epochs	loss_stage1	loss_stage2	ecg_conf_type	ecg_detach_gates	ecg_schedule	ecg_lam_start	ecg_lam_end	ecg_tau_start	ecg_tau_end	ecg_k_start	ecg_k_end	force_run	method_name	run_kind
+binaryCifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	logk_rms	60	0	ce	ce	none	True									True	binary_ce	official
+binaryCifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	logk_rms	60	0	ecg	ecg	1-pe	True	linear	0.05	0.2	0.75	0.98	8	15	True	binary_ecg_optimized	official

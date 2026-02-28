@@ -1,0 +1,9 @@
+#wandb_project=ecg-loss
+# Full-line comments are allowed anywhere.
+# The first non-comment line is the header.
+
+dataset	seed	stop	stop_val	lr	momentum	batch	workers	half_prec	variants	type	stage1_epochs	stage2_epochs	loss_stage1	loss_stage2	ecg_conf_type	ecg_detach_gates	ecg_schedule	ecg_lam_start	ecg_lam_end	ecg_tau_start	ecg_tau_end	ecg_k_start	ecg_k_end	method_name	run_kind	wandb_project
+# CIFAR-10 ECG (overrides project per-row)
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	30	30	ecg	ecg	pmax	True	linear	0.2	1.2	0.5	0.8	5	15	ecg_s1_s2_linear	official	ecg-loss
+# CIFAR-10 CE baseline (uses header project; you can leave wandb_project empty)
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ce	ce	none	True	none							pureCE	official	
