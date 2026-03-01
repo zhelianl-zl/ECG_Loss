@@ -1,5 +1,22 @@
-#wandb_project=ecg-loss
+#wandb_project=ecg_binary_1-pe
 
-dataset	seed	stop	stop_val	lr	momentum	batch	workers	half_prec	variants	type	stage1_epochs	stage2_epochs	loss_stage1	loss_stage2	ecg_conf_type	ecg_detach_gates	ecg_schedule	ecg_lam_start	ecg_lam_end	ecg_tau_start	ecg_tau_end	ecg_k_start	ecg_k_end	method_name	run_kind
-cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	pmax	True	linear	0.2	1.2	0.5	0.8	5	15	ecg_s1_s2_linear	official
-cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	30	30	ecg	ecg	pmax	True	linear	0.2	1.2	0.5	0.8	5	15	ecg_s1_s2_linear	official
+dataset	seed	stop	stop_val	lr	momentum	batch	workers	half_prec	variants	type	pe_mode	stage1_epochs	stage2_epochs	loss_stage1	loss_stage2	ecg_conf_type	ecg_detach_gates	ecg_schedule	ecg_lam_start	ecg_lam_end	ecg_tau_start	ecg_tau_end	ecg_k_start	ecg_k_end	force_run	method_name	run_kind
+binaryCifar10	0	epochs	100	0.01	0.9	64	0	False	none	std	logk_rms	60	40	ce	ce	none	True	none							True	binary_ce	official
+binaryCifar10	0	epochs	100	0.01	0.9	64	0	False	none	std	logk_rms	60	40	ecg	ecg	1-pe	True	linear	0.05	0.2	0.75	0.98	8	15	True	binary_ecg_optimized	official
+# 1) pmax 宽松：更容易开 gate（先试）
+binaryCifar10	0	epochs	100	0.01	0.9	64	0	False	none	std	logk_rms	60	40	ecg	ecg	pmax	True	linear	0.05	0.2	0.55	0.85	8	15	True	binary_pmax_tau55_85_k8_15	official
+
+# 2) pmax 中宽松（常用起点）
+binaryCifar10	0	epochs	100	0.01	0.9	64	0	False	none	std	logk_rms	60	40	ecg	ecg	pmax	True	linear	0.05	0.2	0.60	0.90	8	15	True	binary_pmax_tau60_90_k8_15	official
+
+# 3) pmax 中等（最推荐和 1-pe 最优对齐时先试）
+binaryCifar10	0	epochs	100	0.01	0.9	64	0	False	none	std	logk_rms	60	40	ecg	ecg	pmax	True	linear	0.05	0.2	0.65	0.93	8	15	True	binary_pmax_tau65_93_k8_15	official
+
+# 4) pmax 中严格（更接近“只对很高置信样本开 gate”）
+binaryCifar10	0	epochs	100	0.01	0.9	64	0	False	none	std	logk_rms	60	40	ecg	ecg	pmax	True	linear	0.05	0.2	0.70	0.95	8	15	True	binary_pmax_tau70_95_k8_15	official
+
+# 5) pmax 同 tau(0.65→0.93) 但 gate 更软（k 降低，训练更稳）
+binaryCifar10	0	epochs	100	0.01	0.9	64	0	False	none	std	logk_rms	60	40	ecg	ecg	pmax	True	linear	0.05	0.2	0.65	0.93	6	12	True	binary_pmax_tau65_93_k6_12	official
+
+# 6) pmax 同 tau(0.65→0.93) 但 gate 更硬（k 提高，更强调高置信）
+binaryCifar10	0	epochs	100	0.01	0.9	64	0	False	none	std	logk_rms	60	40	ecg	ecg	pmax	True	linear	0.05	0.2	0.65	0.93	10	20	True	binary_pmax_tau65_93_k10_20	official
