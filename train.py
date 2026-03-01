@@ -1171,6 +1171,13 @@ class trainModel():
             # Creates once at the beginning of training
             self.scaler = torch.cuda.amp.GradScaler()
 
+        # ---- lightweight runtime diagnostics ----
+        # Logs per-epoch loss-call latency (sampled) + epoch wall time to W&B.
+        # Compare CE vs ECG/CEGS runs to show the gating/grad-scaling overhead is ~0 in practice.
+        self.log_runtime = True
+        self.rt_sample_every = 20  # measure every N loss calls; set 1 for full tracing
+        self._rt_epoch_active = False
+        self._rt_reset_epoch_buffers()
         return
 
     # -------------------------------
@@ -1277,12 +1284,179 @@ class trainModel():
         # start at t=0, end at t=1
         return float(end + 0.5 * (start - end) * (1.0 + math.cos(math.pi * t)))
 
+
+    # -------------------------------
+    # Runtime diagnostics utilities
+    # -------------------------------
+    def _rt_reset_epoch_buffers(self):
+        # epoch wall-clock (includes train + eval inside this epoch scope)
+        self._rt_epoch_wall_start = None
+        self._rt_epoch_wall_s = 0.0
+
+        # sampled loss-call timing buffers (training only; CUDA uses events -> sync once per epoch)
+        self._rt_loss_call_idx = 0
+        self._rt_loss_cpu_ms_sum = 0.0
+        self._rt_loss_cpu_n = 0
+        self._rt_loss_cpu_imgs = 0
+
+        self._rt_loss_cuda_pairs = []  # list[(ev_start, ev_end, batch_size)]
+        self._rt_loss_cuda_ms_sum = 0.0
+        self._rt_loss_cuda_n = 0
+        self._rt_loss_cuda_imgs = 0
+
+    def _rt_on_epoch_begin(self, global_epoch: int):
+        # enable only when W&B is active and user didn't disable
+        try:
+            enabled = bool(getattr(self, "log_runtime", True)) and (wandb.run is not None)
+        except Exception:
+            enabled = False
+
+        self._rt_enabled = enabled
+        self._rt_epoch_active = bool(enabled)
+        self._rt_epoch_wall_start = time.perf_counter() if enabled else None
+        self._rt_reset_epoch_buffers()
+
+        # keep epoch index (for logging)
+        try:
+            self._rt_epoch_idx = int(global_epoch)
+        except Exception:
+            self._rt_epoch_idx = None
+
+    def _rt_on_epoch_end(self, global_epoch: int):
+        if not getattr(self, "_rt_enabled", False):
+            self._rt_epoch_active = False
+            return
+
+        # wall time
+        try:
+            if self._rt_epoch_wall_start is not None:
+                self._rt_epoch_wall_s = float(time.perf_counter() - self._rt_epoch_wall_start)
+        except Exception:
+            self._rt_epoch_wall_s = 0.0
+
+        # finalize CUDA loss timings (sync ONCE)
+        if self._rt_loss_cuda_pairs:
+            try:
+                torch.cuda.synchronize()
+            except Exception:
+                pass
+            ms_sum = 0.0
+            n = 0
+            imgs = 0
+            for ev0, ev1, bs in self._rt_loss_cuda_pairs:
+                try:
+                    ms = float(ev0.elapsed_time(ev1))  # milliseconds
+                    ms_sum += ms
+                    n += 1
+                    imgs += int(bs)
+                except Exception:
+                    continue
+            self._rt_loss_cuda_ms_sum = ms_sum
+            self._rt_loss_cuda_n = n
+            self._rt_loss_cuda_imgs = imgs
+
+        # pick CPU/CUDA aggregates depending on device
+        use_cuda = False
+        try:
+            use_cuda = (self.device is not None) and (getattr(self.device, "type", "") == "cuda")
+        except Exception:
+            use_cuda = False
+
+        if use_cuda and self._rt_loss_cuda_n > 0:
+            loss_ms_avg = self._rt_loss_cuda_ms_sum / float(self._rt_loss_cuda_n)
+            loss_imgs = self._rt_loss_cuda_imgs
+            loss_n = self._rt_loss_cuda_n
+            backend = "cuda_event"
+        else:
+            loss_ms_avg = self._rt_loss_cpu_ms_sum / float(self._rt_loss_cpu_n) if self._rt_loss_cpu_n > 0 else float("nan")
+            loss_imgs = self._rt_loss_cpu_imgs
+            loss_n = self._rt_loss_cpu_n
+            backend = "cpu_timer"
+
+        # derived
+        epoch_wall_s = float(self._rt_epoch_wall_s) if self._rt_epoch_wall_s else float("nan")
+        imgs_per_s = (float(loss_imgs) / epoch_wall_s) if (epoch_wall_s and epoch_wall_s > 0 and loss_imgs > 0) else float("nan")
+
+        # log
+        try:
+            if wandb.run is not None:
+                wandb.log(
+                    {
+                        "TIME/epoch_wall_s": epoch_wall_s,
+                        "TIME/loss_call_ms": float(loss_ms_avg),
+                        "TIME/loss_call_n": int(loss_n),
+                        "TIME/loss_call_imgs": int(loss_imgs),
+                        "TIME/img_per_s_est": float(imgs_per_s),
+                        "TIME/backend": str(backend),
+                        "TIME/rt_sample_every": int(getattr(self, "rt_sample_every", 0)),
+                    },
+                    step=int(global_epoch),
+                )
+        except Exception:
+            pass
+
+        self._rt_epoch_active = False
+
+    def _rt_loss_timer_start(self, batch_size: int):
+        # Only time during an "epoch scope" (between _rt_on_epoch_begin/end)
+        if not getattr(self, "_rt_enabled", False) or not getattr(self, "_rt_epoch_active", False):
+            return None
+
+        self._rt_loss_call_idx += 1
+        every = int(getattr(self, "rt_sample_every", 1) or 1)
+        do_sample = (every <= 1) or (self._rt_loss_call_idx % every == 0)
+        if not do_sample:
+            return None
+
+        # CUDA events (async) vs CPU timer
+        use_cuda = False
+        try:
+            use_cuda = (self.device is not None) and (getattr(self.device, "type", "") == "cuda") and torch.cuda.is_available()
+        except Exception:
+            use_cuda = False
+
+        if use_cuda:
+            try:
+                ev0 = torch.cuda.Event(enable_timing=True)
+                ev0.record()
+                return ("cuda", ev0, int(batch_size))
+            except Exception:
+                pass
+
+        # fallback
+        return ("cpu", float(time.perf_counter()), int(batch_size))
+
+    def _rt_loss_timer_end(self, token):
+        if token is None:
+            return
+
+        kind = token[0]
+        if kind == "cuda":
+            ev0, bs = token[1], token[2]
+            try:
+                ev1 = torch.cuda.Event(enable_timing=True)
+                ev1.record()
+                self._rt_loss_cuda_pairs.append((ev0, ev1, int(bs)))
+            except Exception:
+                return
+        else:
+            t0, bs = float(token[1]), int(token[2])
+            t1 = float(time.perf_counter())
+            self._rt_loss_cpu_ms_sum += (t1 - t0) * 1000.0
+            self._rt_loss_cpu_n += 1
+            self._rt_loss_cpu_imgs += int(bs)
     def _ecg_on_epoch_begin(self, global_epoch: int):
         """Apply ECG scheduling before the epoch starts."""
 
         # --- ECG stats (epoch-level): reset accumulator ---
         self._ecg_stat_sum = {}
         self._ecg_stat_n = 0
+
+        # --- Runtime stats (epoch-level) ---
+        try:
+            self._rt_on_epoch_begin(global_epoch)
+        except Exception:
+            pass
 
         sched = getattr(self, "ecg_schedule", "none")
         if sched in (None, "none", "fixed"):
@@ -1349,6 +1523,12 @@ class trainModel():
                 avg = {f"ECG/{k}": (v / float(self._ecg_stat_n)) for k, v in getattr(self, "_ecg_stat_sum", {}).items()}
                 if avg:
                     wandb.log(avg, step=int(global_epoch))
+        except Exception:
+            pass
+
+        # --- Runtime stats (epoch-level): log once per epoch ---
+        try:
+            self._rt_on_epoch_end(global_epoch)
         except Exception:
             pass
 
@@ -2640,63 +2820,79 @@ class trainModel():
         return (0, 0, 0)
 
 
-    def LossFunction(self, model, X, y, y_pred, num_samples=5, CrossEntropyFunction=False):
-        # LOSS_MIN_CROSSENT = 0 # minimize cross entropy loss
-        # LOSS_MIN_CROSSENT_UNC  = 1 # minimize cross_entropy_loss + uncertainty
-        # LOSS_MIN_CROSSENT_MAX_UNC = 2 # minimize cross_entropy_loss - uncertainty = minimize cross_entropy_loss + maximize uncertainty 
-        # LOSS_MIN_UNC = 3 # minimize -uncertainty = maximize uncertainty 
-        
-        if self.LossInUse == LOSS_ECG:
-            loss, stats = ecg_loss(
-                y_pred, y,
-                lam=self.ecg_lam,
-                tau=self.ecg_tau,
-                k=self.ecg_k,
-                conf_type=self.ecg_conf_type,
-                detach_gates=getattr(self, "ecg_detach_gates", True)
-            )
-
-            if getattr(self, "use_wandb", False):
-                # Accumulate ECG gate stats (avoid per-batch wandb spam)
+        def LossFunction(self, model, X, y, y_pred, num_samples=5, CrossEntropyFunction=False):
+            # LOSS_MIN_CROSSENT = 0 # minimize cross entropy loss
+            # LOSS_MIN_CROSSENT_UNC  = 1 # minimize cross_entropy_loss + uncertainty
+            # LOSS_MIN_CROSSENT_MAX_UNC = 2 # minimize cross_entropy_loss - uncertainty = minimize cross_entropy_loss + maximize uncertainty
+            # LOSS_MIN_UNC = 3 # minimize -uncertainty = maximize uncertainty
+    
+            # ---- runtime diag: time the loss call (sampled) ----
+            rt_token = None
+            try:
+                bs = int(y_pred.shape[0]) if hasattr(y_pred, "shape") and len(y_pred.shape) > 0 else 0
+            except Exception:
+                bs = 0
+            try:
+                rt_token = self._rt_loss_timer_start(batch_size=bs)
+            except Exception:
+                rt_token = None
+    
+            def _rt_ret(val):
                 try:
-                    if not hasattr(self, "_ecg_stat_sum"):
-                        self._ecg_stat_sum = {}
-                        self._ecg_stat_n = 0
-                    self._ecg_stat_n += 1
-                    for _k, _v in stats.items():
-                        try:
-                            _fv = float(_v)
-                        except Exception:
-                            # torch tensors
-                            try:
-                                _fv = float(_v.detach().cpu().item())
-                            except Exception:
-                                continue
-                        self._ecg_stat_sum[_k] = self._ecg_stat_sum.get(_k, 0.0) + _fv
+                    self._rt_loss_timer_end(rt_token)
                 except Exception:
                     pass
-
-            return loss
-
-        if CrossEntropyFunction:
-            # to test the model
-            return nn.CrossEntropyLoss()(y_pred, y) #CrossEntropy_Loss()(model, X, y, y_pred, num_samples)
-
-        if self.LossInUse == LOSS_MIN_CROSSENT_UNC:
-            return CrossEntropy_Uncertainty_Loss()(model, X, y, y_pred, num_samples)
-        elif self.LossInUse == LOSS_MIN_CROSSENT_MAX_UNC:
-            return CrossEntropy_Certainty_Loss()(model, X, y, y_pred, num_samples)
-        elif self.LossInUse == LOSS_MIN_UNC:
-            return Uncertainty_Loss()(model, X, y, y_pred, num_samples)
-        elif self.LossInUse == LOSS_MAX_UNC:
-            return Certainty_Loss()(model, X, y, y_pred, num_samples)     
-        elif self.LossInUse == LOSS_MIN_BINARYCROSSENT:
-            return BinaryCrossEntropy_Loss()(model, X, y, y_pred, num_samples)    
-        
-        #if arrieves here , it means that the loss function is the cross entropy loss
-        #else LOSS_MIN_CROSSENT = 0 # minimize cross entropy loss
-        return CrossEntropy_Loss()(model, X, y, y_pred, num_samples)
-
+                return val
+    
+            if self.LossInUse == LOSS_ECG:
+                loss, stats = ecg_loss(
+                    y_pred, y,
+                    lam=self.ecg_lam,
+                    tau=self.ecg_tau,
+                    k=self.ecg_k,
+                    conf_type=self.ecg_conf_type,
+                    detach_gates=getattr(self, "ecg_detach_gates", True)
+                )
+    
+                if getattr(self, "use_wandb", False):
+                    # Accumulate ECG gate stats (avoid per-batch wandb spam)
+                    try:
+                        if not hasattr(self, "_ecg_stat_sum"):
+                            self._ecg_stat_sum = {}
+                            self._ecg_stat_n = 0
+                        self._ecg_stat_n += 1
+                        for _k, _v in stats.items():
+                            try:
+                                _fv = float(_v)
+                            except Exception:
+                                # torch tensors
+                                try:
+                                    _fv = float(_v.detach().cpu().item())
+                                except Exception:
+                                    continue
+                            self._ecg_stat_sum[_k] = self._ecg_stat_sum.get(_k, 0.0) + _fv
+                    except Exception:
+                        pass
+    
+                return _rt_ret(loss)
+    
+            if CrossEntropyFunction:
+                # to test the model
+                return _rt_ret(nn.CrossEntropyLoss()(y_pred, y))  # CrossEntropy_Loss()(model, X, y, y_pred, num_samples)
+    
+            if self.LossInUse == LOSS_MIN_CROSSENT_UNC:
+                return _rt_ret(CrossEntropy_Uncertainty_Loss()(model, X, y, y_pred, num_samples))
+            elif self.LossInUse == LOSS_MIN_CROSSENT_MAX_UNC:
+                return _rt_ret(CrossEntropy_Certainty_Loss()(model, X, y, y_pred, num_samples))
+            elif self.LossInUse == LOSS_MIN_UNC:
+                return _rt_ret(Uncertainty_Loss()(model, X, y, y_pred, num_samples))
+            elif self.LossInUse == LOSS_MAX_UNC:
+                return _rt_ret(Certainty_Loss()(model, X, y, y_pred, num_samples))
+            elif self.LossInUse == LOSS_MIN_BINARYCROSSENT:
+                return _rt_ret(BinaryCrossEntropy_Loss()(model, X, y, y_pred, num_samples))
+    
+            # if arrives here, it means that the loss function is the cross entropy loss
+            return _rt_ret(CrossEntropy_Loss()(model, X, y, y_pred, num_samples))
 
     def epoch(self, loader, model, opt=None, num_samples=5, lagrangian=None):
         """Standard training/evaluation epoch over the dataset"""
@@ -3541,6 +3737,9 @@ class trainModel():
             "STD/ECE": test_extra["ECE"],
             "STD/u_thr": test_extra["u_thr"],
 
+            "STD/AUROC_err_conf": test_extra.get("AUROC_err_conf", float("nan")),
+            "STD/AUROC_err_unc":  test_extra.get("AUROC_err_unc", float("nan")),
+
             # PGD
             "PGD/Error": adv_err,
             "PGD/Entropy": adv_entropy,
@@ -3550,6 +3749,9 @@ class trainModel():
             "PGD/Corr": adv_extra["Corr"],
             "PGD/Wasserstein": adv_extra["Wasserstein"],
             "PGD/ECE": adv_extra["ECE"],
+
+            "PGD/AUROC_err_conf": adv_extra.get("AUROC_err_conf", float("nan")),
+            "PGD/AUROC_err_unc":  adv_extra.get("AUROC_err_unc", float("nan")),
         }, step=global_step)
 
         return test_err, test_loss, test_entropy, test_MI, adv_err, adv_loss, adv_entropy, adv_MI
@@ -3653,6 +3855,45 @@ class trainModel():
             conf_bin = conf[mask].mean()
             ece += (mask.mean()) * abs(acc_bin - conf_bin)
         return float(ece)
+
+    @staticmethod
+    def _auroc(y_true: np.ndarray, y_score: np.ndarray) -> float:
+        """AUROC for binary labels (y_true in {0,1}). Handles ties via average ranks.
+
+        If only one class is present, returns NaN.
+        """
+        y_true = np.asarray(y_true).astype(np.int32)
+        y_score = np.asarray(y_score).astype(np.float64)
+        if y_true.size == 0:
+            return float("nan")
+        pos = (y_true == 1)
+        neg = (y_true == 0)
+        n_pos = int(pos.sum())
+        n_neg = int(neg.sum())
+        if n_pos == 0 or n_neg == 0:
+            return float("nan")
+
+        order = np.argsort(y_score, kind="mergesort")
+        s_sorted = y_score[order]
+        ranks = np.empty_like(s_sorted, dtype=np.float64)
+
+        # Average ranks for ties
+        n = len(s_sorted)
+        i = 0
+        while i < n:
+            j = i + 1
+            while j < n and s_sorted[j] == s_sorted[i]:
+                j += 1
+            # ranks are 1..n
+            avg_rank = 0.5 * ((i + 1) + j)
+            ranks[i:j] = avg_rank
+            i = j
+
+        ranks_full = np.empty_like(ranks)
+        ranks_full[order] = ranks
+        sum_pos = float(ranks_full[pos].sum())
+        auc = (sum_pos - (n_pos * (n_pos + 1) / 2.0)) / float(n_pos * n_neg)
+        return float(auc)
 
     @staticmethod
     def _u_metrics_from_uncertainty(unc: np.ndarray, correct: np.ndarray):
@@ -3837,7 +4078,10 @@ class trainModel():
         ECE = self._ece(conf, corr, n_bins=15)
         uA, uAUC, best_thr, self._curve = self._u_metrics_from_uncertainty(unc, corr)
 
-        extra = {"uA": uA, "uAUC": uAUC, "Corr": Corr, "Wasserstein": Wass, "ECE": ECE, "u_thr": best_thr}
+        AUROC_conf = self._auroc(err01, 1.0 - conf)
+        AUROC_unc  = self._auroc(err01, unc)
+
+        extra = {"uA": uA, "uAUC": uAUC, "Corr": Corr, "Wasserstein": Wass, "ECE": ECE, "u_thr": best_thr, "AUROC_err_conf": AUROC_conf, "AUROC_err_unc": AUROC_unc}
         return err, loss, ent, mi, extra
 
     def test_epoch_adversarial(
@@ -4026,6 +4270,9 @@ class trainModel():
         ECE = self._ece(conf, corr, n_bins=15)
         uA, uAUC, best_thr, _curve = self._u_metrics_from_uncertainty(unc, corr)
 
+        AUROC_conf = self._auroc(err01, 1.0 - conf)
+        AUROC_unc  = self._auroc(err01, unc)
+
         adv_extra = {
             "uA": uA,
             "uAUC": uAUC,
@@ -4033,6 +4280,8 @@ class trainModel():
             "Wasserstein": Wass,
             "ECE": ECE,
             "u_thr": best_thr,
+            "AUROC_err_conf": AUROC_conf,
+            "AUROC_err_unc": AUROC_unc,
         }
 
         return adv_err, adv_loss, adv_entropy, adv_mi, adv_extra
@@ -4473,7 +4722,7 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
          ecg_schedule, ecg_lam_start, ecg_lam_end, ecg_tau_start, ecg_tau_end, ecg_k_start, ecg_k_end, ecg_adapt_warmup, ecg_adapt_window,
          ecg_tau_target, ecg_tau_lr, ecg_tau_ema, ecg_tau_deadzone, ecg_tau_min, ecg_tau_max,
          device, devices_id, lr, momentum, batch, lr_adv, momentum_adv, batch_adv,
-         half_prec=False, variants='none'):
+         half_prec=False, variants='none', log_runtime=True, rt_sample_every=20):
     
     dataset_loader = dataset(dataset_name=dataset_name, batch_size = batch, batch_size_adv = batch_adv)
     model_cnn = model(dataset_loader, dataset_name, device, devices_id, lr, momentum, lr_adv, momentum_adv, batch_adv, half_prec=half_prec, variants=variants)
@@ -4515,6 +4764,11 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
 
     model_cnn.use_wandb = (wandb.run is not None)
     model_cnn.new_iterations = int(stage2_epochs)
+
+
+    # runtime diagnostics config
+    model_cnn.log_runtime = bool(log_runtime)
+    model_cnn.rt_sample_every = int(rt_sample_every)
 
     #trainTime, train_err, train_loss = model_cnn.run(modelName, iterations=int(stage1_epochs), stop=stop)
     model_cnn.run(runName, iterations=int(stage1_epochs), stop=stop, ckptName=ckptName, runName=runName)
@@ -4635,6 +4889,11 @@ if __name__ == '__main__':
                         help="Deadzone for tau_target updates. If |active_frac-target|<deadzone, do not update tau.")
     parser.add_argument("--ecg_tau_min", type=float, default=0.0)
     parser.add_argument("--ecg_tau_max", type=float, default=0.99)
+
+    # ---- runtime diagnostics ----
+    parser.add_argument("--log_runtime", type=str2bool, default=True)
+    parser.add_argument("--rt_sample_every", type=int, default=20,
+                        help="Measure loss-call latency every N calls (CUDA uses events + 1 sync per epoch).")
 
     parser.add_argument("--force_run", action="store_true")
 
@@ -4856,5 +5115,6 @@ if __name__ == "__main__":
         device, devices_id,
         args.lr, args.momentum, args.batch,
         args.lr_adv, args.momentum_adv, args.batch_adv,
-        args.half_prec, args.variants
+        args.half_prec, args.variants,
+        args.log_runtime, args.rt_sample_every
     )
