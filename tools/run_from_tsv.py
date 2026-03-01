@@ -2,40 +2,42 @@
 # -*- coding: utf-8 -*-
 
 """
-run_from_tsv.py (patched)
+tools/run_from_tsv.py
 
-What you get:
-- TSV supports setting W&B project like your notebook:
-    1) Top-of-file directive (applies to all rows):
-         #wandb_project=ecg-loss
-       or  #wandb_project: ecg-loss
-    2) Per-row column "wandb_project" (overrides the directive)
+Key features:
+- TSV supports meta directive (full-line comment):
+    #wandb_project=ecg-loss
+  (or "#wandb_project: ecg-loss")
 
-  If the project exists in W&B -> the run goes into it.
-  If it doesn't exist -> W&B will create it automatically.
+- Optional per-row column "wandb_project" overrides the meta directive.
 
-- Run name is clear + cancellable (contains job/task id):
-    <dataset>_s1-<e1>-<loss1>_s2-<e2>-<loss2>_pe-<pe>_j<arrayjob>_t<task>
+- W&B run name is descriptive AND distinguishes ecg_conf_type (e.g., 1-pe vs pmax),
+  while keeping Slurm array job/task id so you can scancel quickly.
 
-- Adds notebook-base args support via TSV columns:
-  momentum, workers, half_prec, variants, type, pe_mode, loss_stage1,
-  and all ecg_* schedule start/end fields.
+  Format:
+    <dataset>_s1-<e1>-<loss1>_s2-<e2>-<loss2>_pe-<pe>_conf-<conf>_sch-<sch>_lam<...>_tau<...>_k<...>_j<arrayjob>_t<task>
 
-Expected CLI (kept compatible with your sbatch):
-  python run_from_tsv.py --conf sweeps/universal.tsv --idx $SLURM_ARRAY_TASK_ID --run_dir ... --commit ...
+  Examples:
+    binaryCifar10_s1-60-ecg_s2-40-ecg_pe-logk_rms_conf-1pe_sch-linear_lam0.05-0.2_tau0.75-0.98_k8-15_j37772932_t1
+    binaryCifar10_s1-60-ecg_s2-40-ecg_pe-logk_rms_conf-pmax_sch-linear_lam0.05-0.2_tau0.65-0.93_k8-15_j37772932_t4
+
+- Builds the train.py command from TSV columns. Missing/empty fields are not passed.
+
+CLI (compatible with your sbatch):
+  python -u tools/run_from_tsv.py --conf <tsv> --idx <row_idx> --run_dir <dir> --commit <sha>
 """
 
 import argparse
+import fcntl
 import os
 import re
 import subprocess
 from pathlib import Path
-import fcntl
-from typing import List, Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 
 # -----------------------------
-# TSV parsing (with meta support)
+# TSV parsing with meta support
 # -----------------------------
 def _parse_tsv_with_meta(conf_path: Path) -> Tuple[List[str], List[str], Dict[str, str]]:
     """
@@ -60,16 +62,14 @@ def _parse_tsv_with_meta(conf_path: Path) -> Tuple[List[str], List[str], Dict[st
     data_lines: List[str] = []
 
     for ln in raw_lines:
-        s = ln.strip()
-        if not s:
+        s = ln.rstrip("\n")
+        if not s.strip():
             continue
 
-        # full-line comment
         if s.lstrip().startswith("#"):
             t = s.lstrip()[1:].strip()
             tl = t.lower()
 
-            # meta directive
             if tl.startswith("wandb_project=") or tl.startswith("wandb_project:"):
                 if "=" in t:
                     meta["wandb_project"] = t.split("=", 1)[1].strip()
@@ -84,14 +84,13 @@ def _parse_tsv_with_meta(conf_path: Path) -> Tuple[List[str], List[str], Dict[st
 
         # non-comment line
         if header_line is None:
-            header_line = s.lstrip("#").strip()
+            header_line = s.strip()
         else:
-            data_lines.append(s)
+            data_lines.append(s.strip())
 
     if header_line is None:
         return [], [], meta
-    header_fields = header_line.split("\t")
-    return header_fields, data_lines, meta
+    return header_line.split("\t"), data_lines, meta
 
 
 def read_tsv_row(conf_path: Path, idx: int) -> Tuple[Dict[str, str], Dict[str, str]]:
@@ -109,7 +108,7 @@ def read_tsv_row(conf_path: Path, idx: int) -> Tuple[Dict[str, str], Dict[str, s
 
 
 # -----------------------------
-# Dataset helpers
+# Helpers
 # -----------------------------
 def normalize_dataset_name(ds: str) -> str:
     d = (ds or "").strip().lower()
@@ -117,15 +116,15 @@ def normalize_dataset_name(ds: str) -> str:
         "binary": "binaryCifar10",
         "binarycifar10": "binaryCifar10",
         "binary-cifar10": "binaryCifar10",
-        "imagenet": "imageNet",
-        "image1k": "imageNet",
-        "image-net": "imageNet",
         "cifar-10": "cifar10",
         "cifar10": "cifar10",
         "cifar-100": "cifar100",
         "cifar100": "cifar100",
         "svhn": "svhn",
         "mnist": "mnist",
+        "imagenet": "imageNet",
+        "image1k": "imageNet",
+        "image-net": "imageNet",
     }
     return mapping.get(d, ds)
 
@@ -171,22 +170,9 @@ def _add_arg(cmd: List[str], flag: str, hp: Dict[str, str], key: str, default: O
 
 
 def _add_flag(cmd: List[str], hp: Dict[str, str], key: str) -> None:
-    """
-    Add a boolean flag (e.g. --force_run) if TSV column value is truthy.
-    Truthy: 1/true/yes/y
-    """
     v = str(hp.get(key, "")).strip().lower()
     if v in {"1", "true", "yes", "y"}:
         cmd.append(f"--{key}")
-
-
-def _merge_tags(existing: str, new_tags: List[str]) -> str:
-    ex = [t.strip() for t in (existing or "").split(",") if t.strip()]
-    out = ex[:]
-    for t in new_tags:
-        if t and t not in out:
-            out.append(t)
-    return ",".join(out)
 
 
 def choose_wandb_project(dataset: str) -> str:
@@ -196,6 +182,10 @@ def choose_wandb_project(dataset: str) -> str:
         if k in os.environ and os.environ[k].strip():
             return os.environ[k].strip()
     return os.environ.get("WANDB_PROJECT_DEFAULT", "CEGS").strip()
+
+
+def _safe_token(s: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", s)
 
 
 def main() -> None:
@@ -212,101 +202,87 @@ def main() -> None:
 
     hp, meta = read_tsv_row(conf_path, args.idx)
 
-    dataset_raw = hp.get("dataset", "").strip()
-    dataset = normalize_dataset_name(dataset_raw)
-    seed = hp.get("seed", "0").strip()
-    stop_val = hp.get("stop_val", "").strip()
-    stage1 = hp.get("stage1_epochs", "").strip()
-    stage2 = hp.get("stage2_epochs", "").strip()
+    dataset = normalize_dataset_name(hp.get("dataset", "").strip())
+    seed = (hp.get("seed") or "0").strip()
+    stop_val = (hp.get("stop_val") or "").strip()
+    e1 = (hp.get("stage1_epochs") or "").strip() or "0"
+    e2 = (hp.get("stage2_epochs") or "").strip() or "0"
 
-    # method/run_kind (optional columns)
-    method_name = (hp.get("method_name") or hp.get("loss_stage2") or "exp").strip()
+    loss1 = (hp.get("loss_stage1") or "").strip() or "none"
+    loss2 = (hp.get("loss_stage2") or "").strip() or "none"
+    pe = (hp.get("pe_mode") or "").strip() or "none"
+
+    # ecg knobs (for naming only; train args are passed later)
+    sch = (hp.get("ecg_schedule") or "").strip() or "none"
+    conf = (hp.get("ecg_conf_type") or "").strip() or "none"
+    conf_safe = re.sub(r"[^A-Za-z0-9]+", "", conf.lower())  # "1-pe" -> "1pe"
+
+    lam_s = (hp.get("ecg_lam_start") or "").strip()
+    lam_e = (hp.get("ecg_lam_end") or "").strip()
+    lam_c = (hp.get("ecg_lam") or "").strip()
+    lam_part = f"{lam_s}-{lam_e}" if (lam_s and lam_e) else (lam_c if lam_c else "na")
+
+    tau_s = (hp.get("ecg_tau_start") or "").strip()
+    tau_e = (hp.get("ecg_tau_end") or "").strip()
+    tau_c = (hp.get("ecg_tau") or "").strip()
+    tau_part = f"{tau_s}-{tau_e}" if (tau_s and tau_e) else (tau_c if tau_c else "na")
+
+    k_s = (hp.get("ecg_k_start") or "").strip()
+    k_e = (hp.get("ecg_k_end") or "").strip()
+    k_c = (hp.get("ecg_k") or "").strip()
+    k_part = f"{k_s}-{k_e}" if (k_s and k_e) else (k_c if k_c else "na")
+
+    method_name = (hp.get("method_name") or loss2 or "exp").strip()
     run_kind = (hp.get("run_kind") or os.environ.get("WANDB_JOB_TYPE_DEFAULT", "official")).strip()
 
-    # --- W&B project selection ---
-    # Priority: per-row -> TSV meta directive -> env mapping by dataset
+    # Project selection: per-row -> TSV meta -> env mapping
     project = (hp.get("wandb_project") or meta.get("wandb_project") or "").strip()
     if not project:
         project = choose_wandb_project(dataset)
 
-    total_epochs = stop_val or "T?"
-    default_group = f"{dataset}_{run_kind}_s{seed}_T{total_epochs}"
+    # Slurm ids (for cancel)
+    array_job = os.environ.get("SLURM_ARRAY_JOB_ID") or os.environ.get("SLURM_JOB_ID") or "noj"
+    task_id = os.environ.get("SLURM_ARRAY_TASK_ID") or str(args.idx)
 
-    tags = [run_kind, dataset, f"s{seed}", method_name, f"T{total_epochs}"]
-    if stage1:
-        tags.append(f"s1{stage1}")
-    if stage2:
-        tags.append(f"s2{stage2}")
-
-    # W&B env: always set project (exists -> use; not exists -> W&B creates)
-    os.environ["WANDB_PROJECT"] = project
-
-    # ---- Run name (clear + cancellable + includes ECG hyperparams) ----
-    # Priority:
-    # 1) TSV per-row column "wandb_name" (explicit override)
-    # 2) Auto name:
-    #    <dataset>_s1-<e1>-<loss1>_s2-<e2>-<loss2>_pe-<pe>_sch-<sch>_lam<...>_tau<...>_k<...>_j<arrayjob>_t<task>
+    # Run name (TSV override supported)
     tsv_wandb_name = (hp.get("wandb_name") or "").strip()
     if tsv_wandb_name:
-        os.environ["WANDB_NAME"] = tsv_wandb_name
+        run_name = tsv_wandb_name
     else:
-        array_job = os.environ.get("SLURM_ARRAY_JOB_ID") or os.environ.get("SLURM_JOB_ID") or "noj"
-        task_id = os.environ.get("SLURM_ARRAY_TASK_ID") or "0"
-
-        e1 = (hp.get("stage1_epochs") or "").strip()
-        e2 = (hp.get("stage2_epochs") or "").strip()
-        l1 = (hp.get("loss_stage1") or "").strip() or "none"
-        l2 = (hp.get("loss_stage2") or "").strip() or "none"
-        pe = (hp.get("pe_mode") or "").strip() or "none"
-
-        sch = (hp.get("ecg_schedule") or "").strip() or "none"
-
-        # Prefer start/end if provided; else fallback to constant params.
-        lam_s = (hp.get("ecg_lam_start") or "").strip()
-        lam_e = (hp.get("ecg_lam_end") or "").strip()
-        lam_c = (hp.get("ecg_lam") or "").strip()
-        lam_part = f"{lam_s}-{lam_e}" if (lam_s and lam_e) else (lam_c if lam_c else "na")
-
-        tau_s = (hp.get("ecg_tau_start") or "").strip()
-        tau_e = (hp.get("ecg_tau_end") or "").strip()
-        tau_c = (hp.get("ecg_tau") or "").strip()
-        tau_part = f"{tau_s}-{tau_e}" if (tau_s and tau_e) else (tau_c if tau_c else "na")
-
-        k_s = (hp.get("ecg_k_start") or "").strip()
-        k_e = (hp.get("ecg_k_end") or "").strip()
-        k_c = (hp.get("ecg_k") or "").strip()
-        k_part = f"{k_s}-{k_e}" if (k_s and k_e) else (k_c if k_c else "na")
-
         raw = (
             f"{dataset}"
-            f"_s1-{e1}-{l1}"
-            f"_s2-{e2}-{l2}"
+            f"_s1-{e1}-{loss1}"
+            f"_s2-{e2}-{loss2}"
             f"_pe-{pe}"
+            f"_conf-{conf_safe}"
             f"_sch-{sch}"
             f"_lam{lam_part}"
             f"_tau{tau_part}"
             f"_k{k_part}"
             f"_j{array_job}_t{task_id}"
         )
+        run_name = _safe_token(raw)[:200]
 
-        # sanitize to W&B-safe name
-        safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", raw)
-        os.environ["WANDB_NAME"] = safe[:200]
+    # Group (TSV override supported; default group by array)
+    group = (hp.get("wandb_group") or "").strip()
+    if not group:
+        group = f"j{array_job}"
 
-    # Group: keep array grouping by default unless TSV provides one
-    if not os.environ.get("WANDB_GROUP", "").strip():
-        wg = (hp.get("wandb_group") or "").strip()
-        if wg:
-            os.environ["WANDB_GROUP"] = wg
-        else:
-            array_job = os.environ.get("SLURM_ARRAY_JOB_ID") or os.environ.get("SLURM_JOB_ID") or "noj"
-            os.environ["WANDB_GROUP"] = f"j{array_job}"
+    # tags (optional)
+    tags = [
+        run_kind, dataset, f"s{seed}", method_name,
+        f"T{stop_val or 'T?'}", f"s1{e1}", f"s2{e2}",
+        f"conf-{conf_safe}", f"sch-{sch}",
+    ]
 
-    # Job type: run_kind (e.g., official/ablation)
+    # W&B env
+    os.environ["WANDB_PROJECT"] = project
+    if os.environ.get("WANDB_ENTITY", "").strip():
+        os.environ["WANDB_ENTITY"] = os.environ["WANDB_ENTITY"].strip()
+    os.environ["WANDB_NAME"] = run_name
+    os.environ["WANDB_GROUP"] = group
     os.environ["WANDB_JOB_TYPE"] = run_kind
-
-    # merge tags with any existing tags from sbatch
-    os.environ["WANDB_TAGS"] = _merge_tags(os.environ.get("WANDB_TAGS", ""), tags)
+    os.environ["WANDB_TAGS"] = ",".join([t for t in tags if t])
     os.environ["PYTHONUNBUFFERED"] = "1"
 
     # data root
@@ -317,7 +293,7 @@ def main() -> None:
     # build train.py cmd
     cmd: List[str] = ["python", "-u", "train.py"]
 
-    # core training args (notebook base_args compatible)
+    # common training args
     _add_arg(cmd, "--type", hp, "type")
     _add_arg(cmd, "--dataset", {"dataset": dataset}, "dataset")
     _add_arg(cmd, "--seed", hp, "seed")
@@ -331,31 +307,23 @@ def main() -> None:
     _add_arg(cmd, "--variants", hp, "variants")
     _add_arg(cmd, "--pe_mode", hp, "pe_mode")
 
-    # adversarial / robust knobs (optional)
-    _add_arg(cmd, "--alg", hp, "alg")
-    _add_arg(cmd, "--ratio_adv", hp, "ratio_adv")
-    _add_arg(cmd, "--ratio", hp, "ratio")
-    _add_arg(cmd, "--epsilon", hp, "epsilon")
-    _add_arg(cmd, "--num_iter", hp, "num_iter")
-    _add_arg(cmd, "--alpha", hp, "alpha")
-
-    # 2-stage controls
+    # 2-stage
     _add_arg(cmd, "--stage1_epochs", hp, "stage1_epochs")
     _add_arg(cmd, "--stage2_epochs", hp, "stage2_epochs")
     _add_arg(cmd, "--loss_stage1", hp, "loss_stage1")
     _add_arg(cmd, "--loss_stage2", hp, "loss_stage2")
-    _add_flag(cmd, hp, "full_ecg")
+
+    # flags
     _add_flag(cmd, hp, "force_run")
+    _add_flag(cmd, hp, "full_ecg")
 
-    # ECG/CEGS params
-    _add_arg(cmd, "--ecg_conf_type", hp, "ecg_conf_type")
-    _add_arg(cmd, "--ecg_detach_gates", hp, "ecg_detach_gates")
-    _add_arg(cmd, "--ecg_schedule", hp, "ecg_schedule")
-
-    # constants (optional)
+    # ECG/CEGS params (constants)
     _add_arg(cmd, "--ecg_lam", hp, "ecg_lam")
     _add_arg(cmd, "--ecg_tau", hp, "ecg_tau")
     _add_arg(cmd, "--ecg_k", hp, "ecg_k")
+    _add_arg(cmd, "--ecg_conf_type", hp, "ecg_conf_type")
+    _add_arg(cmd, "--ecg_detach_gates", hp, "ecg_detach_gates")
+    _add_arg(cmd, "--ecg_schedule", hp, "ecg_schedule")
 
     # schedules (start/end)
     _add_arg(cmd, "--ecg_lam_start", hp, "ecg_lam_start")
@@ -365,22 +333,14 @@ def main() -> None:
     _add_arg(cmd, "--ecg_k_start", hp, "ecg_k_start")
     _add_arg(cmd, "--ecg_k_end", hp, "ecg_k_end")
 
-    # adaptive / tau_target knobs (optional)
-    _add_arg(cmd, "--ecg_adapt_warmup", hp, "ecg_adapt_warmup")
-    _add_arg(cmd, "--ecg_adapt_window", hp, "ecg_adapt_window")
-    _add_arg(cmd, "--ecg_tau_target", hp, "ecg_tau_target")
-    _add_arg(cmd, "--ecg_tau_lr", hp, "ecg_tau_lr")
-    _add_arg(cmd, "--ecg_tau_ema", hp, "ecg_tau_ema")
-    _add_arg(cmd, "--ecg_tau_deadzone", hp, "ecg_tau_deadzone")
-    _add_arg(cmd, "--ecg_tau_min", hp, "ecg_tau_min")
-    _add_arg(cmd, "--ecg_tau_max", hp, "ecg_tau_max")
-
-    # record for debugging
+    # record
     (run_dir / "cmd.txt").write_text(" ".join(cmd) + "\n", encoding="utf-8")
     (run_dir / "wandb_meta.txt").write_text(
-        f"project={project}\nname={os.environ.get('WANDB_NAME','')}\n"
-        f"group={os.environ.get('WANDB_GROUP','')}\njob_type={os.environ.get('WANDB_JOB_TYPE','')}\n"
-        f"tags={os.environ.get('WANDB_TAGS','')}\n",
+        f"project={project}\n"
+        f"entity={os.environ.get('WANDB_ENTITY','')}\n"
+        f"name={run_name}\n"
+        f"group={group}\n"
+        f"job_type={run_kind}\n",
         encoding="utf-8",
     )
 
