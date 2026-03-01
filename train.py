@@ -48,7 +48,7 @@ PE_RMS_EPS = 1e-8
 Normalize_entropy = (PE_MODE != "raw")
 USE_PE_RMS = (PE_MODE == "logk_rms")
 
-imageNet_original = False
+imageNet_original = os.environ.get("IMAGENET_ORIGINAL", "0").lower() in ("1","true","yes","y")
 LOSS_MIN_CROSSENT = 0 # minimize cross entropy loss
 LOSS_MIN_CROSSENT_UNC  = 1 # minimize cross_entropy_loss + uncertainty
 LOSS_MIN_CROSSENT_MAX_UNC = 2 # minimize cross_entropy_loss - uncertainty = minimize cross_entropy_loss + maximize uncertainty 
@@ -1065,9 +1065,21 @@ class dataset():
 
             self.data_val = self.data_test
 
-            self.train_loader = DataLoader(self.data_train, batch_size = batch_size, shuffle=True, pin_memory=True,) if batch_size > 0 else None
-            self.trainAvd_loader = DataLoader(self.data_train, batch_size = batch_size_adv, shuffle=True, pin_memory=True,) if batch_size_adv > 0 else None
-            self.test_loader = DataLoader(self.data_test, batch_size = batch_size_test, shuffle=False, pin_memory=True,)
+            # DataLoader workers (important for ImageNet I/O throughput)
+            DL_WORKERS = int(os.environ.get("DL_WORKERS", os.environ.get("WORKERS", "8")))
+            DL_WORKERS = max(DL_WORKERS, 0)
+            DL_KW = dict(
+                pin_memory=True,
+                num_workers=DL_WORKERS,
+                persistent_workers=(DL_WORKERS > 0),
+            )
+            if DL_WORKERS > 0:
+                DL_KW["prefetch_factor"] = 2
+
+            # keep shuffle=False because training code derives stable sample IDs from batch order
+            self.train_loader = DataLoader(self.data_train, batch_size=batch_size, shuffle=False, **DL_KW,) if batch_size > 0 else None
+            self.trainAvd_loader = DataLoader(self.data_train, batch_size=batch_size_adv, shuffle=False, **DL_KW,) if batch_size_adv > 0 else None
+            self.test_loader = DataLoader(self.data_test, batch_size=batch_size_test, shuffle=False, **DL_KW,)
             #self.val_loader = self.test_loader
 
 
@@ -1896,7 +1908,7 @@ class trainModel():
         #opt = optim.Adam(model.parameters(), lr=lr/10.0)
 
         for param_group in opt.param_groups:
-            param_group["lr"] = lr if not cycle_lr else  10e-4 #lr/10.0
+            param_group["lr"] = lr #lr/10.0
 
         write_pred_logs = True
 
@@ -2348,7 +2360,7 @@ class trainModel():
 
 
         for param_group in opt.param_groups:
-            param_group["lr"] = lr if not cycle_lr else  10e-4 #lr/10.0
+            param_group["lr"] = lr #lr/10.0
             param_group["momentum"] = momentum                  
 
 
@@ -2398,7 +2410,7 @@ class trainModel():
             torch.cuda.empty_cache()
 
         for param_group in opt.param_groups:
-            param_group["lr"] = lr_adv if not cycle_lr else 10e-4 # lr_adv/10.0
+            param_group["lr"] = lr_adv # lr_adv/10.0
             param_group["momentum"] = momentum_adv
         half_batch_size_adv=int(loader.batch_size_adv/2)
         epoch_counter = 1
@@ -2553,7 +2565,7 @@ class trainModel():
         #
 
         for param_group in opt.param_groups: # restore the ST HP values
-            param_group["lr"] = lr if not cycle_lr else 10e-4 #  lr/10.0
+            param_group["lr"] = lr #  lr/10.0
             param_group["momentum"] = momentum     
 
 
@@ -2601,7 +2613,7 @@ class trainModel():
             torch.cuda.empty_cache()
 
         for param_group in opt.param_groups:
-            param_group["lr"] = lr_adv if not cycle_lr else 10e-4 # lr_adv/10.0
+            param_group["lr"] = lr_adv # lr_adv/10.0
             param_group["momentum"] = momentum_adv
         half_batch_size_adv=int(loader.batch_size_adv/2)
         epoch_counter = 1
@@ -4814,7 +4826,7 @@ if __name__ == '__main__':
     parser.add_argument('--momentum_adv', type=float, help='momentum adv training', default=0.0)
     parser.add_argument('--batch_adv', type=int, help='batch adv training', default=100)
 
-    parser.add_argument('--workers', type=str, help='GPU workers', default="0")
+    parser.add_argument('--workers', type=int, help='DataLoader workers', default=0)
     parser.add_argument('--half_prec', type=str2bool, help='half precision', default=False)
 
     parser.add_argument('--variants', type=str, help='calibration, deup, ensemble, cals', default='none')
@@ -4898,6 +4910,10 @@ if __name__ == '__main__':
     parser.add_argument("--force_run", action="store_true")
 
     args = parser.parse_args()
+
+    # DataLoader workers: prefer DL_WORKERS env, otherwise fall back to --workers
+    if "DL_WORKERS" not in os.environ:
+        os.environ["DL_WORKERS"] = str(max(int(getattr(args, "workers", 0)), 0))
 
     def _apply_stage2_from_args(args):
         global LOSS_2nd_stage_wrong, LOSS_2nd_stage_correct, option_stage2

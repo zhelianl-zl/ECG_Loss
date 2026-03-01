@@ -1,5 +1,16 @@
-#wandb_project=ecg-loss
+#wandb_project=ecg-cifar10
+dataset	seed	stop	stop_val	lr	momentum	batch	workers	half_prec	variants	type	stage1_epochs	stage2_epochs	loss_stage1	loss_stage2	ecg_conf_type	ecg_detach_gates	ecg_schedule	ecg_lam	ecg_tau	ecg_k	ecg_lam_start	ecg_lam_end	ecg_tau_start	ecg_tau_end	ecg_k_start	ecg_k_end	ecg_tau_target	ecg_tau_lr	ecg_tau_ema	ecg_tau_deadzone	method_name	run_kind
 
-dataset	seed	stop	stop_val	lr	momentum	batch	workers	half_prec	variants	type	stage1_epochs	stage2_epochs	loss_stage1	loss_stage2	ecg_conf_type	ecg_detach_gates	ecg_schedule	ecg_lam_start	ecg_lam_end	ecg_tau_start	ecg_tau_end	ecg_k_start	ecg_k_end	method_name	run_kind
-cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	30	30	ecg	ecg	pmax	True	linear	0.2	1.2	0.5	0.8	5	15	ecg_s1_s2_linear	official
-cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ce	ce	none	True	none							pureCE	official
+# (A) tau 精细扫描（固定 lam=0.40, k=8）
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	pmax	True	none	0.4	0.56	8											ECG_s0_lam0.4_tau0.56_k8	r2
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	pmax	True	none	0.4	0.57	8											ECG_s0_lam0.4_tau0.57_k8	r2
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	pmax	True	none	0.4	0.59	8											ECG_s0_lam0.4_tau0.59_k8	r2
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	pmax	True	none	0.4	0.61	8											ECG_s0_lam0.4_tau0.61_k8	r2
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	pmax	True	none	0.4	0.63	8											ECG_s0_lam0.4_tau0.63_k8	r2
+
+# (B) lam 小步微调（固定 tau=0.60, k=8）
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	pmax	True	none	0.38	0.6	8											ECG_s0_lam0.38_tau0.6_k8	r2
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	pmax	True	none	0.42	0.6	8											ECG_s0_lam0.42_tau0.6_k8	r2
+
+# (C) 更硬的 k 备选（固定 lam=0.40, tau=0.60）
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	pmax	True	none	0.4	0.6	10											ECG_s0_lam0.4_tau0.6_k10	r2

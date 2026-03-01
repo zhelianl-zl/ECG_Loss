@@ -12,7 +12,7 @@ umask 077
 # Priority: BASE from environment -> SLURM_SUBMIT_DIR (original submission directory) -> current working directory.
 BASE="${BASE:-${SLURM_SUBMIT_DIR:-$PWD}}"
 BASE="$(cd "$BASE" && pwd)"
-CONF="${CONF:-$BASE/sweeps/cifar100.tsv}"
+CONF="${CONF:-$BASE/sweeps/imageNet1k.tsv}"
 
 # Prefer DATA_DIR/RUNS_DIR exported by submit_array.sh
 # If not provided, default to Ocean project space when available (large quota).
@@ -42,6 +42,13 @@ fi
 AUTO_DOWNLOAD="${CEGS_AUTO_DOWNLOAD:-1}"
 
 mkdir -p "$RUNS_DIR" "$DATA_DIR"
+
+# ---- ImageNet-1k (ILSVRC2012) on Bridges-2: use shared community dataset via symlinks (no download, no copy) ----
+mkdir -p "$DATA_DIR/imageNet"
+ln -sfn /ocean/datasets/community/imagenet/train "$DATA_DIR/imageNet/train"
+ln -sfn /ocean/datasets/community/imagenet/val   "$DATA_DIR/imageNet/val"
+# -------------------------------------------------------------------------------------------------------------
+
 
 RUN="$RUNS_DIR/${SLURM_JOB_NAME}_${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
 mkdir -p "$RUN" "$DATA_DIR" "$RUNS_DIR"
@@ -74,13 +81,17 @@ ln -sfn "$DATA_DIR" "$RUN/data"
 export CEGS_DATA_DIR="$DATA_DIR"
 export CEGS_AUTO_DOWNLOAD="$AUTO_DOWNLOAD"
 
+# Use original 224x224 ImageNet-1k
+export IMAGENET_ORIGINAL="${IMAGENET_ORIGINAL:-1}"
+
 # W&B isolation per task
 mkdir -p "$RUN/wandb"
 chmod 700 "$RUN/wandb" 2>/dev/null || true
 export WANDB_DIR="$RUN/wandb"
 export WANDB_MODE="${WANDB_MODE:-online}"
 export WANDB_ENTITY="${WANDB_ENTITY:-}"
-export WANDB_PROJECT_DEFAULT="${WANDB_PROJECT_DEFAULT:-CEGS}"
+export WANDB_PROJECT="${WANDB_PROJECT:-cegs-image1k-pmax}"
+export WANDB_PROJECT_DEFAULT="${WANDB_PROJECT_DEFAULT:-$WANDB_PROJECT}"
 export WANDB_JOB_TYPE_DEFAULT="${WANDB_JOB_TYPE_DEFAULT:-official}"
 
 # Make W&B run name map 1:1 to Slurm array task
