@@ -1,16 +1,20 @@
 #wandb_project=ecg-cifar10
 dataset	seed	stop	stop_val	lr	momentum	batch	workers	half_prec	variants	type	stage1_epochs	stage2_epochs	loss_stage1	loss_stage2	ecg_conf_type	ecg_detach_gates	ecg_schedule	ecg_lam	ecg_tau	ecg_k	ecg_lam_start	ecg_lam_end	ecg_tau_start	ecg_tau_end	ecg_k_start	ecg_k_end	ecg_tau_target	ecg_tau_lr	ecg_tau_ema	ecg_tau_deadzone	method_name	run_kind
+# (L1) lam 线性衰减：0.40 -> 0.10（最常用）
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	pmax	True	linear	0.40	0.60	8	0.40	0.10	0.60	0.60	8	8					ECG_lin_lam0.40to0.10_tau0.60_k8	r2
+# (L2) lam 衰减更强：0.40 -> 0.05（看 early 更不更强）
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	pmax	True	linear	0.40	0.60	8	0.40	0.05	0.60	0.60	8	8					ECG_lin_lam0.40to0.05_tau0.60_k8	r2
+# (L3) lam 起点更高：0.45 -> 0.10（更强调前期 gate）
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	pmax	True	linear	0.45	0.60	8	0.45	0.10	0.60	0.60	8	8					ECG_lin_lam0.45to0.10_tau0.60_k8	r2
+# (L4) lam 起点更低：0.38 -> 0.10（贴近你当前最优 lam）
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	pmax	True	linear	0.38	0.60	8	0.38	0.10	0.60	0.60	8	8					ECG_lin_lam0.38to0.10_tau0.60_k8	r2
 
-# (A) tau 精细扫描（固定 lam=0.40, k=8）
-cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	pmax	True	none	0.4	0.56	8											ECG_s0_lam0.4_tau0.56_k8	r2
-cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	pmax	True	none	0.4	0.57	8											ECG_s0_lam0.4_tau0.57_k8	r2
-cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	pmax	True	none	0.4	0.59	8											ECG_s0_lam0.4_tau0.59_k8	r2
-cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	pmax	True	none	0.4	0.61	8											ECG_s0_lam0.4_tau0.61_k8	r2
-cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	pmax	True	none	0.4	0.63	8											ECG_s0_lam0.4_tau0.63_k8	r2
+# (L5) lam 线性上升（warmup）：0.10 -> 0.40（你说 Colab sweet spot 可能更像这种）
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	pmax	True	linear	0.10	0.60	8	0.10	0.40	0.60	0.60	8	8					ECG_lin_lam0.10to0.40_tau0.60_k8	r2
+# (L6) lam 上升更强：0.05 -> 0.45（更“后期发力”）
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	pmax	True	linear	0.05	0.60	8	0.05	0.45	0.60	0.60	8	8					ECG_lin_lam0.05to0.45_tau0.60_k8	r2
 
-# (B) lam 小步微调（固定 tau=0.60, k=8）
-cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	pmax	True	none	0.38	0.6	8											ECG_s0_lam0.38_tau0.6_k8	r2
-cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	pmax	True	none	0.42	0.6	8											ECG_s0_lam0.42_tau0.6_k8	r2
-
-# (C) 更硬的 k 备选（固定 lam=0.40, tau=0.60）
-cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	pmax	True	none	0.4	0.6	10											ECG_s0_lam0.4_tau0.6_k10	r2
+# (L7) lam 衰减 + tau 轻微上升：lam 0.40->0.10, tau 0.58->0.62（看是否更贴合前35）
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	pmax	True	linear	0.40	0.58	8	0.40	0.10	0.58	0.62	8	8					ECG_lin_lam0.40to0.10_tau0.58to0.62_k8	r2
+# (L8) lam 衰减 + k 线性变硬：lam 0.40->0.10, k 6->12（看更“聚焦高置信错误”会不会更强）
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	pmax	True	linear	0.40	0.60	6	0.40	0.10	0.60	0.60	6	12					ECG_lin_lam0.40to0.10_tau0.60_k6to12	r2

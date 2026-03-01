@@ -32,6 +32,7 @@ import fcntl
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -291,7 +292,7 @@ def main() -> None:
     ensure_dataset(data_root, dataset, auto_download=auto_download)
 
     # build train.py cmd
-    cmd: List[str] = ["python", "-u", "train.py"]
+    cmd: List[str] = [sys.executable, "-u", "train.py"]
 
     # common training args
     _add_arg(cmd, "--type", hp, "type")
@@ -332,6 +333,12 @@ def main() -> None:
     _add_arg(cmd, "--ecg_tau_end", hp, "ecg_tau_end")
     _add_arg(cmd, "--ecg_k_start", hp, "ecg_k_start")
     _add_arg(cmd, "--ecg_k_end", hp, "ecg_k_end")
+
+    # adaptive tau_target schedule (optional)
+    _add_arg(cmd, "--ecg_tau_target", hp, "ecg_tau_target")
+    _add_arg(cmd, "--ecg_tau_lr", hp, "ecg_tau_lr")
+    _add_arg(cmd, "--ecg_tau_ema", hp, "ecg_tau_ema")
+    _add_arg(cmd, "--ecg_tau_deadzone", hp, "ecg_tau_deadzone")
 
     # record
     (run_dir / "cmd.txt").write_text(" ".join(cmd) + "\n", encoding="utf-8")
