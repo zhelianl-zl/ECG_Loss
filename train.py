@@ -2820,79 +2820,79 @@ class trainModel():
         return (0, 0, 0)
 
 
-        def LossFunction(self, model, X, y, y_pred, num_samples=5, CrossEntropyFunction=False):
-            # LOSS_MIN_CROSSENT = 0 # minimize cross entropy loss
-            # LOSS_MIN_CROSSENT_UNC  = 1 # minimize cross_entropy_loss + uncertainty
-            # LOSS_MIN_CROSSENT_MAX_UNC = 2 # minimize cross_entropy_loss - uncertainty = minimize cross_entropy_loss + maximize uncertainty
-            # LOSS_MIN_UNC = 3 # minimize -uncertainty = maximize uncertainty
+    def LossFunction(self, model, X, y, y_pred, num_samples=5, CrossEntropyFunction=False):
+        # LOSS_MIN_CROSSENT = 0 # minimize cross entropy loss
+        # LOSS_MIN_CROSSENT_UNC  = 1 # minimize cross_entropy_loss + uncertainty
+        # LOSS_MIN_CROSSENT_MAX_UNC = 2 # minimize cross_entropy_loss - uncertainty = minimize cross_entropy_loss + maximize uncertainty
+        # LOSS_MIN_UNC = 3 # minimize -uncertainty = maximize uncertainty
     
-            # ---- runtime diag: time the loss call (sampled) ----
+        # ---- runtime diag: time the loss call (sampled) ----
+        rt_token = None
+        try:
+            bs = int(y_pred.shape[0]) if hasattr(y_pred, "shape") and len(y_pred.shape) > 0 else 0
+        except Exception:
+            bs = 0
+        try:
+            rt_token = self._rt_loss_timer_start(batch_size=bs)
+        except Exception:
             rt_token = None
-            try:
-                bs = int(y_pred.shape[0]) if hasattr(y_pred, "shape") and len(y_pred.shape) > 0 else 0
-            except Exception:
-                bs = 0
-            try:
-                rt_token = self._rt_loss_timer_start(batch_size=bs)
-            except Exception:
-                rt_token = None
     
-            def _rt_ret(val):
+        def _rt_ret(val):
+            try:
+                self._rt_loss_timer_end(rt_token)
+            except Exception:
+                pass
+            return val
+    
+        if self.LossInUse == LOSS_ECG:
+            loss, stats = ecg_loss(
+                y_pred, y,
+                lam=self.ecg_lam,
+                tau=self.ecg_tau,
+                k=self.ecg_k,
+                conf_type=self.ecg_conf_type,
+                detach_gates=getattr(self, "ecg_detach_gates", True)
+            )
+    
+            if getattr(self, "use_wandb", False):
+                # Accumulate ECG gate stats (avoid per-batch wandb spam)
                 try:
-                    self._rt_loss_timer_end(rt_token)
+                    if not hasattr(self, "_ecg_stat_sum"):
+                        self._ecg_stat_sum = {}
+                        self._ecg_stat_n = 0
+                    self._ecg_stat_n += 1
+                    for _k, _v in stats.items():
+                        try:
+                            _fv = float(_v)
+                        except Exception:
+                            # torch tensors
+                            try:
+                                _fv = float(_v.detach().cpu().item())
+                            except Exception:
+                                continue
+                        self._ecg_stat_sum[_k] = self._ecg_stat_sum.get(_k, 0.0) + _fv
                 except Exception:
                     pass
-                return val
     
-            if self.LossInUse == LOSS_ECG:
-                loss, stats = ecg_loss(
-                    y_pred, y,
-                    lam=self.ecg_lam,
-                    tau=self.ecg_tau,
-                    k=self.ecg_k,
-                    conf_type=self.ecg_conf_type,
-                    detach_gates=getattr(self, "ecg_detach_gates", True)
-                )
+            return _rt_ret(loss)
     
-                if getattr(self, "use_wandb", False):
-                    # Accumulate ECG gate stats (avoid per-batch wandb spam)
-                    try:
-                        if not hasattr(self, "_ecg_stat_sum"):
-                            self._ecg_stat_sum = {}
-                            self._ecg_stat_n = 0
-                        self._ecg_stat_n += 1
-                        for _k, _v in stats.items():
-                            try:
-                                _fv = float(_v)
-                            except Exception:
-                                # torch tensors
-                                try:
-                                    _fv = float(_v.detach().cpu().item())
-                                except Exception:
-                                    continue
-                            self._ecg_stat_sum[_k] = self._ecg_stat_sum.get(_k, 0.0) + _fv
-                    except Exception:
-                        pass
+        if CrossEntropyFunction:
+            # to test the model
+            return _rt_ret(nn.CrossEntropyLoss()(y_pred, y))  # CrossEntropy_Loss()(model, X, y, y_pred, num_samples)
     
-                return _rt_ret(loss)
+        if self.LossInUse == LOSS_MIN_CROSSENT_UNC:
+            return _rt_ret(CrossEntropy_Uncertainty_Loss()(model, X, y, y_pred, num_samples))
+        elif self.LossInUse == LOSS_MIN_CROSSENT_MAX_UNC:
+            return _rt_ret(CrossEntropy_Certainty_Loss()(model, X, y, y_pred, num_samples))
+        elif self.LossInUse == LOSS_MIN_UNC:
+            return _rt_ret(Uncertainty_Loss()(model, X, y, y_pred, num_samples))
+        elif self.LossInUse == LOSS_MAX_UNC:
+            return _rt_ret(Certainty_Loss()(model, X, y, y_pred, num_samples))
+        elif self.LossInUse == LOSS_MIN_BINARYCROSSENT:
+            return _rt_ret(BinaryCrossEntropy_Loss()(model, X, y, y_pred, num_samples))
     
-            if CrossEntropyFunction:
-                # to test the model
-                return _rt_ret(nn.CrossEntropyLoss()(y_pred, y))  # CrossEntropy_Loss()(model, X, y, y_pred, num_samples)
-    
-            if self.LossInUse == LOSS_MIN_CROSSENT_UNC:
-                return _rt_ret(CrossEntropy_Uncertainty_Loss()(model, X, y, y_pred, num_samples))
-            elif self.LossInUse == LOSS_MIN_CROSSENT_MAX_UNC:
-                return _rt_ret(CrossEntropy_Certainty_Loss()(model, X, y, y_pred, num_samples))
-            elif self.LossInUse == LOSS_MIN_UNC:
-                return _rt_ret(Uncertainty_Loss()(model, X, y, y_pred, num_samples))
-            elif self.LossInUse == LOSS_MAX_UNC:
-                return _rt_ret(Certainty_Loss()(model, X, y, y_pred, num_samples))
-            elif self.LossInUse == LOSS_MIN_BINARYCROSSENT:
-                return _rt_ret(BinaryCrossEntropy_Loss()(model, X, y, y_pred, num_samples))
-    
-            # if arrives here, it means that the loss function is the cross entropy loss
-            return _rt_ret(CrossEntropy_Loss()(model, X, y, y_pred, num_samples))
+        # if arrives here, it means that the loss function is the cross entropy loss
+        return _rt_ret(CrossEntropy_Loss()(model, X, y, y_pred, num_samples))
 
     def epoch(self, loader, model, opt=None, num_samples=5, lagrangian=None):
         """Standard training/evaluation epoch over the dataset"""
