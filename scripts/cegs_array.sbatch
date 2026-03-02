@@ -111,8 +111,9 @@ export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:T
 
 export IMAGENET_ORIGINAL=1
 export IMAGENET_TORCHVISION=1
-# 可选：打印首个batch形状
-export DEBUG_IMAGENET_SHAPE=1
+export IMAGENET_ROOT=/path/to/imagenet_root   # 这个目录里应有 train/ 和 val/
+export DL_WORKERS=5                            # 可选
+export DEBUG_IMAGENET_SHAPE=1                  # 可选，确认 224
 
 # Activate conda env (Python 3.10)
 source "$HOME/miniconda3/etc/profile.d/conda.sh"
