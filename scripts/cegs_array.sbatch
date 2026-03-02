@@ -5,6 +5,11 @@
 #SBATCH -o slurm_logs/slurm_%x_%A_%a.out
 #SBATCH -e slurm_logs/slurm_%x_%A_%a.err
 
+# GPU selection is controlled at submission time by scripts/submit_array.sh via -p/--gres.
+# Examples:
+#   GRES=gpu:h100-80:1 PARTITION=GPU-shared ./scripts/submit_array.sh sweeps/imageNet1k.tsv 10
+#   GRES=gpu:l40s-48:1 PARTITION=GPU-shared ./scripts/submit_array.sh sweeps/imageNet1k.tsv 10
+
 set -euo pipefail
 umask 077
 
@@ -90,7 +95,7 @@ chmod 700 "$RUN/wandb" 2>/dev/null || true
 export WANDB_DIR="$RUN/wandb"
 export WANDB_MODE="${WANDB_MODE:-online}"
 export WANDB_ENTITY="${WANDB_ENTITY:-}"
-export WANDB_PROJECT="${WANDB_PROJECT:-cegs-image1k-pmax}"
+export WANDB_PROJECT="${WANDB_PROJECT:-cegs-imageNet1k-pmax}"
 export WANDB_PROJECT_DEFAULT="${WANDB_PROJECT_DEFAULT:-$WANDB_PROJECT}"
 export WANDB_JOB_TYPE_DEFAULT="${WANDB_JOB_TYPE_DEFAULT:-official}"
 
@@ -102,12 +107,15 @@ export WANDB_TAGS="${WANDB_TAGS:-},slurm,job${SLURM_JOB_ID},array${SLURM_ARRAY_J
 #Make re
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
 export PYTHONHASHSEED=0
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 
 # Activate conda env (Python 3.10)
 source "$HOME/miniconda3/etc/profile.d/conda.sh"
 conda activate cegs
 unset LD_PRELOAD || true
 python -V
+echo "GPU_INFO=$(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader | head -n 1 2>/dev/null || echo n/a)"
+nvidia-smi -L 2>/dev/null || true
 
 cd "$RUN/src"
 python -u tools/run_from_tsv.py \

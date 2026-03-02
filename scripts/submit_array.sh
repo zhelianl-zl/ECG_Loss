@@ -4,6 +4,24 @@ set -euo pipefail
 CONF_PATH="${1:-sweeps/cifar100.tsv}"
 MAX_PARALLEL="${2:-8}"
 
+# Optional positional overrides:
+#   $3: GPU model or full GRES (e.g., "h100-80" or "gpu:h100-80:1")
+#   $4: partition (e.g., "GPU-shared" or "GPU")
+GPU_ARG="${3:-}"
+PARTITION_ARG="${4:-}"
+
+if [[ -n "$GPU_ARG" ]]; then
+  if [[ "$GPU_ARG" == gpu:* ]]; then
+    export GRES="$GPU_ARG"
+  else
+    export GRES="gpu:${GPU_ARG}:1"
+  fi
+fi
+
+if [[ -n "$PARTITION_ARG" ]]; then
+  export PARTITION="$PARTITION_ARG"
+fi
+
 # Slurm defaults (override via env if needed)
 ACCOUNT="${ACCOUNT:-cis260049p}"
 PARTITION="${PARTITION:-GPU-shared}"
