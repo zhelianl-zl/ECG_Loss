@@ -682,25 +682,12 @@ class DEUP():
         self.f_predictor = f_model
         self.f_optimizer = f_optim
         self.e_predictor = ResNet(BasicBlock, [2, 2, 2, 2], 1, 18, 0.0).to(self.device) #create_network2(1, 1, 1024, 'relu', False, 5).to(self.device)
-        # Keep DEUP LR identical to the base model LR (stage-1 LR) and fixed across stages
-        self.base_lr = float(self.f_optimizer.param_groups[0].get('lr', 0.1))
-        self.e_optimizer = optim.SGD(self.e_predictor.parameters(), lr=self.base_lr, momentum=0.9)
+        self.e_optimizer =  optim.SGD(self.e_predictor.parameters(), lr=0.001, momentum=0.9)
 
         self.loss_fn=nn.CrossEntropyLoss(reduction='none')
         self.e_loss_fn=nn.MSELoss()
 
         self.percentage_valSet = 0.1
-
-    def _lock_e_lr(self):
-        """Force DEUP optimizer LR to stay equal to the base model LR."""
-        try:
-            # Refresh base_lr from the base model optimizer (in case the caller changed it)
-            self.base_lr = float(self.f_optimizer.param_groups[0].get('lr', self.base_lr))
-            for pg in self.e_optimizer.param_groups:
-                pg['lr'] = float(self.base_lr)
-        except Exception:
-            pass
-
 
 
     def train(self, algorithm=None, epsilon=0.1, num_iter=20, alpha=0.01):
@@ -731,8 +718,6 @@ class DEUP():
 
     def fit_uncertainty_estimator_dataloader(self, data, epochs=None, batch_size=128, data_test=None):
 
-        self._lock_e_lr()
-
         train_loader = DataLoader(data, shuffle=True, batch_size=batch_size)
         if data_test is not None: test_loader = DataLoader(data, shuffle=True, batch_size=batch_size)
 
@@ -756,7 +741,6 @@ class DEUP():
         self.e_predictor.train()
         train_losses = []
         for epoch in range(epochs):
-            self._lock_e_lr()
             epoch_losses = []
             e_loss_sum, j = 0, 0
             for features, target in loader: # target here is the loss of the base model
@@ -796,8 +780,6 @@ class DEUP():
 
     def fit_uncertainty_estimator_dataloader_adversarial(self, data, epochs=None, batch_size=128, data_test=None, algorithm='fgsm', epsilon=0.1, num_iter=20, alpha=0.01):
 
-        self._lock_e_lr()
-
         train_loader = DataLoader(data, shuffle=True, batch_size=batch_size)
         if data_test is not None: test_loader = DataLoader(data, shuffle=True, batch_size=batch_size)
 
@@ -828,7 +810,6 @@ class DEUP():
         self.e_predictor.train()
         train_losses = []
         for epoch in range(epochs):
-            self._lock_e_lr()
             epoch_losses = []
             e_loss_sum, j = 0, 0
             for features, target in loader: # target here is the loss of the base model
@@ -1084,21 +1065,9 @@ class dataset():
 
             self.data_val = self.data_test
 
-            # DataLoader workers (important for ImageNet I/O throughput)
-            DL_WORKERS = int(os.environ.get("DL_WORKERS", os.environ.get("WORKERS", "8")))
-            DL_WORKERS = max(DL_WORKERS, 0)
-            DL_KW = dict(
-                pin_memory=True,
-                num_workers=DL_WORKERS,
-                persistent_workers=(DL_WORKERS > 0),
-            )
-            if DL_WORKERS > 0:
-                DL_KW["prefetch_factor"] = 2
-
-            # keep shuffle=False because training code derives stable sample IDs from batch order
-            self.train_loader = DataLoader(self.data_train, batch_size=batch_size, shuffle=False, **DL_KW,) if batch_size > 0 else None
-            self.trainAvd_loader = DataLoader(self.data_train, batch_size=batch_size_adv, shuffle=False, **DL_KW,) if batch_size_adv > 0 else None
-            self.test_loader = DataLoader(self.data_test, batch_size=batch_size_test, shuffle=False, **DL_KW,)
+            self.train_loader = DataLoader(self.data_train, batch_size = batch_size, shuffle=True, pin_memory=True,) if batch_size > 0 else None
+            self.trainAvd_loader = DataLoader(self.data_train, batch_size = batch_size_adv, shuffle=True, pin_memory=True,) if batch_size_adv > 0 else None
+            self.test_loader = DataLoader(self.data_test, batch_size = batch_size_test, shuffle=False, pin_memory=True,)
             #self.val_loader = self.test_loader
 
 
@@ -1836,20 +1805,6 @@ class trainModel():
         if runName  is None: runName  = modelName
         if self.deep_ensemble:
             return self.standard_train_deep_ensemble(model, modelName, loader, dataset, opt, iterations)
-
-        # ------------------------------------------------------------------
-        # IMPORTANT: keep a constant learning rate across BOTH stages.
-        # Some older edits used lr/10.0 for stage2; this block makes the
-        # behavior explicit and robust (even if something else mutates lr).
-        # We take the *current* optimizer lr (after optional ckpt resume)
-        # as the single source of truth.
-        # ------------------------------------------------------------------
-        def _force_opt_lr(_opt, _lr: float):
-            try:
-                for pg in _opt.param_groups:
-                    pg["lr"] = float(_lr)
-            except Exception:
-                pass
         
         if "binaryCifar10" in modelName: num_classes=2
         elif "cifar100" in modelName: num_classes=100
@@ -1878,8 +1833,6 @@ class trainModel():
                 t1 = time.time()-trainTime
                 model = _model
                 opt = _opt
-                # If we resumed, refresh lr from the resumed optimizer.
-                lr = opt.param_groups[0].get('lr', lr)
                 counter += 1
                 # ===== W&B anchor: 补打一条 step=it（通常就是 30）=====
                 try:
@@ -1905,9 +1858,6 @@ class trainModel():
         for counter in range(it+1, iterations+1):
             if counter == iterations: write_pred_logs = True
             print("epoch number " + str(counter))
-
-            # Enforce constant lr (stage1)
-            _force_opt_lr(opt, lr)
 
             self._ecg_on_epoch_begin(counter)
 
@@ -1945,8 +1895,8 @@ class trainModel():
 
         #opt = optim.Adam(model.parameters(), lr=lr/10.0)
 
-        # Enforce constant lr at stage boundary (stage2 start)
-        _force_opt_lr(opt, lr)
+        for param_group in opt.param_groups:
+            param_group["lr"] = lr if not cycle_lr else  10e-4 #lr/10.0
 
         write_pred_logs = True
 
@@ -1997,9 +1947,6 @@ class trainModel():
             while epoch_counter < max_stage2_epochs+1:
 
                 global_epoch = epoch_counter + iterations
-
-                # Enforce constant lr (stage2)
-                _force_opt_lr(opt, lr)
 
                 if counter_dataSize == 0 and counter_repeat == 0:
 
@@ -2401,7 +2348,7 @@ class trainModel():
 
 
         for param_group in opt.param_groups:
-            param_group["lr"] = lr #lr/10.0
+            param_group["lr"] = lr if not cycle_lr else  10e-4 #lr/10.0
             param_group["momentum"] = momentum                  
 
 
@@ -2451,7 +2398,7 @@ class trainModel():
             torch.cuda.empty_cache()
 
         for param_group in opt.param_groups:
-            param_group["lr"] = lr_adv # lr_adv/10.0
+            param_group["lr"] = lr_adv if not cycle_lr else 10e-4 # lr_adv/10.0
             param_group["momentum"] = momentum_adv
         half_batch_size_adv=int(loader.batch_size_adv/2)
         epoch_counter = 1
@@ -2606,7 +2553,7 @@ class trainModel():
         #
 
         for param_group in opt.param_groups: # restore the ST HP values
-            param_group["lr"] = lr #  lr/10.0
+            param_group["lr"] = lr if not cycle_lr else 10e-4 #  lr/10.0
             param_group["momentum"] = momentum     
 
 
@@ -2654,7 +2601,7 @@ class trainModel():
             torch.cuda.empty_cache()
 
         for param_group in opt.param_groups:
-            param_group["lr"] = lr_adv # lr_adv/10.0
+            param_group["lr"] = lr_adv if not cycle_lr else 10e-4 # lr_adv/10.0
             param_group["momentum"] = momentum_adv
         half_batch_size_adv=int(loader.batch_size_adv/2)
         epoch_counter = 1
@@ -4702,32 +4649,46 @@ class model(trainModel):
         dropout_rate=0.5
 
         if self.dataset_name == "imageNet":
-            num_classes=1000
+            num_classes = 1000
             depth = 50
-            dropout_rate=0.3
+            dropout_rate = 0.3
 
+            # IMPORTANT (ImageNet memory fix):
+            # Use the standard torchvision ResNet stem (stride-2 conv + maxpool) by default.
+            # Our custom ResNet implementation is CIFAR-style (no early downsampling),
+            # which can explode activation memory on 224x224 inputs and OOM even on H100.
+            use_torchvision = os.environ.get("IMAGENET_TORCHVISION", "1").lower() in ("1","true","yes","y")
 
-            # Create an instance of the ResNet-50 model with dropout
-            #model = ResNet50WithDropout(num_classes, dropout_prob=dropout_rate)
-            #model = CustomResNet50(models_.resnet.Bottleneck, [3, 4, 6, 3])
+            if use_torchvision:
+                if depth == 18:
+                    model = tv_models.resnet18(weights=None)
+                elif depth == 34:
+                    model = tv_models.resnet34(weights=None)
+                elif depth == 50:
+                    model = tv_models.resnet50(weights=None)
+                elif depth == 101:
+                    model = tv_models.resnet101(weights=None)
+                else:
+                    model = tv_models.resnet50(weights=None)
 
-            if depth == 18:
-                model = ResNet(BasicBlock, [2, 2, 2, 2], num_classes, depth, dropout_rate)
-            elif depth == 34:
-                model = ResNet(BasicBlock, [3, 4, 6, 3], num_classes, depth, dropout_rate)
-            elif depth == 50:
-                model = ResNet(Bottleneck, [3, 4, 6, 3], num_classes, depth, dropout_rate)
-            elif depth == 101:
-                model = ResNet(Bottleneck, [3, 4, 23, 3], num_classes, depth, dropout_rate)
+                in_features = model.fc.in_features
+                # keep dropout behavior similar to your original code
+                model.fc = nn.Sequential(nn.Dropout(p=dropout_rate), nn.Linear(in_features, num_classes))
             else:
-                #model = ResNet(BasicBlock, [2, 2, 2, 2], num_classes, 18, dropout_rate)
-
-                depth = 28
-                widen_factor=10
-                dropout_rate=0.3
-            
-                model = Wide_ResNet(depth, widen_factor, dropout_rate, num_classes)
-
+                # Fallback to your custom implementation (may OOM on 224x224 if not ImageNet-stem)
+                if depth == 18:
+                    model = ResNet(BasicBlock, [2, 2, 2, 2], num_classes, depth, dropout_rate)
+                elif depth == 34:
+                    model = ResNet(BasicBlock, [3, 4, 6, 3], num_classes, depth, dropout_rate)
+                elif depth == 50:
+                    model = ResNet(Bottleneck, [3, 4, 6, 3], num_classes, depth, dropout_rate)
+                elif depth == 101:
+                    model = ResNet(Bottleneck, [3, 4, 23, 3], num_classes, depth, dropout_rate)
+                else:
+                    depth = 28
+                    widen_factor = 10
+                    dropout_rate = 0.3
+                    model = Wide_ResNet(depth, widen_factor, dropout_rate, num_classes)
 
         elif self.dataset_name == "svhn":
             num_classes=10
@@ -4867,7 +4828,7 @@ if __name__ == '__main__':
     parser.add_argument('--momentum_adv', type=float, help='momentum adv training', default=0.0)
     parser.add_argument('--batch_adv', type=int, help='batch adv training', default=100)
 
-    parser.add_argument('--workers', type=int, help='DataLoader workers', default=0)
+    parser.add_argument('--workers', type=str, help='GPU workers', default="0")
     parser.add_argument('--half_prec', type=str2bool, help='half precision', default=False)
 
     parser.add_argument('--variants', type=str, help='calibration, deup, ensemble, cals', default='none')
@@ -4951,10 +4912,6 @@ if __name__ == '__main__':
     parser.add_argument("--force_run", action="store_true")
 
     args = parser.parse_args()
-
-    # DataLoader workers: prefer DL_WORKERS env, otherwise fall back to --workers
-    if "DL_WORKERS" not in os.environ:
-        os.environ["DL_WORKERS"] = str(max(int(getattr(args, "workers", 0)), 0))
 
     def _apply_stage2_from_args(args):
         global LOSS_2nd_stage_wrong, LOSS_2nd_stage_correct, option_stage2
