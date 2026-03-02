@@ -13,6 +13,7 @@ from torch.utils.data import Subset, ConcatDataset, TensorDataset
 #from torchvision.models import resnet18
 #from torchvision.models import resnet50
 from torchvision.datasets.vision import VisionDataset
+import torchvision.models as tv_models
 #import torchvision.models as models_
 
 #import torch.distributed as dist
@@ -1031,8 +1032,25 @@ class dataset():
             self.num_classes = 1000
             if imageNet_original:
                 print("Original dataset")
-                traindir = '../data/imageNet/train'                
-                valdir = '../data/imageNet/val'                
+                # ImageNet root (PSC public dataset / user-provided path)
+                imagenet_root = os.environ.get("IMAGENET_ROOT", "").strip()
+                if not imagenet_root:
+                    data_dir_env = os.environ.get("DATA_DIR", "").strip()
+                    if data_dir_env:
+                        cand = os.path.join(data_dir_env, "imageNet")
+                        if os.path.isdir(os.path.join(cand, "train")) and os.path.isdir(os.path.join(cand, "val")):
+                            imagenet_root = cand
+                if not imagenet_root:
+                    imagenet_root = "../data/imageNet"
+
+                traindir = os.path.join(imagenet_root, "train")
+                valdir = os.path.join(imagenet_root, "val")
+                if (not os.path.isdir(traindir)) or (not os.path.isdir(valdir)):
+                    raise FileNotFoundError(
+                        f"ImageNet train/val not found. Set IMAGENET_ROOT to the directory containing 'train' and 'val'. "
+                        f"Got traindir={traindir}, valdir={valdir}"
+                    )
+                print(f"[DATA] ImageNet root: {imagenet_root}")
                 crop_size = 224
 
                 normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
@@ -1065,9 +1083,20 @@ class dataset():
 
             self.data_val = self.data_test
 
-            self.train_loader = DataLoader(self.data_train, batch_size = batch_size, shuffle=True, pin_memory=True,) if batch_size > 0 else None
-            self.trainAvd_loader = DataLoader(self.data_train, batch_size = batch_size_adv, shuffle=True, pin_memory=True,) if batch_size_adv > 0 else None
-            self.test_loader = DataLoader(self.data_test, batch_size = batch_size_test, shuffle=False, pin_memory=True,)
+            # DataLoader performance knobs (set DL_WORKERS env; default 0)
+            DL_WORKERS = int(os.environ.get("DL_WORKERS", "0"))
+            DL_WORKERS = max(DL_WORKERS, 0)
+            DL_KW = dict(
+                pin_memory=True,
+                num_workers=DL_WORKERS,
+                persistent_workers=(DL_WORKERS > 0),
+            )
+            if DL_WORKERS > 0:
+                DL_KW["prefetch_factor"] = 2
+
+            self.train_loader = DataLoader(self.data_train, batch_size=batch_size, shuffle=True, **DL_KW) if batch_size > 0 else None
+            self.trainAvd_loader = DataLoader(self.data_train, batch_size=batch_size_adv, shuffle=True, **DL_KW) if batch_size_adv > 0 else None
+            self.test_loader = DataLoader(self.data_test, batch_size=batch_size_test, shuffle=False, **DL_KW)
             #self.val_loader = self.test_loader
 
 
@@ -1178,6 +1207,8 @@ class trainModel():
         self.rt_sample_every = 20  # measure every N loss calls; set 1 for full tracing
         self._rt_epoch_active = False
         self._rt_reset_epoch_buffers()
+        # Print first batch shape once when DEBUG_IMAGENET_SHAPE=1
+        self._debug_shape_printed = False
         return
 
     # -------------------------------
@@ -2900,6 +2931,12 @@ class trainModel():
         misclassified_ids = []
 
         for ct, (X,y) in enumerate(loader):
+            if (not getattr(self, "_debug_shape_printed", False)) and (os.environ.get("DEBUG_IMAGENET_SHAPE", "0").lower() in ("1","true","yes","y")):
+                try:
+                    print(f"[DEBUG] first batch X.shape={tuple(X.shape)} y.shape={tuple(y.shape)} X.dtype={X.dtype}")
+                except Exception:
+                    print("[DEBUG] first batch shape print failed")
+                self._debug_shape_printed = True
             X,y = X.to(self.device), y.to(self.device) # len of bacth size
             if self.half_prec: 
                 # Runs the forward pass with autocasting.
@@ -4660,20 +4697,30 @@ class model(trainModel):
             use_torchvision = os.environ.get("IMAGENET_TORCHVISION", "1").lower() in ("1","true","yes","y")
 
             if use_torchvision:
+                # Use torchvision ResNet with the standard ImageNet stem (stride-2 conv + maxpool)
                 if depth == 18:
-                    model = tv_models.resnet18(weights=None)
+                    ctor = tv_models.resnet18
                 elif depth == 34:
-                    model = tv_models.resnet34(weights=None)
+                    ctor = tv_models.resnet34
                 elif depth == 50:
-                    model = tv_models.resnet50(weights=None)
+                    ctor = tv_models.resnet50
                 elif depth == 101:
-                    model = tv_models.resnet101(weights=None)
+                    ctor = tv_models.resnet101
                 else:
-                    model = tv_models.resnet50(weights=None)
+                    ctor = tv_models.resnet50
+
+                # torchvision API compatibility (weights vs pretrained)
+                try:
+                    model = ctor(weights=None)
+                except TypeError:
+                    model = ctor(pretrained=False)
 
                 in_features = model.fc.in_features
                 # keep dropout behavior similar to your original code
-                model.fc = nn.Sequential(nn.Dropout(p=dropout_rate), nn.Linear(in_features, num_classes))
+                if dropout_rate is not None and float(dropout_rate) > 0:
+                    model.fc = nn.Sequential(nn.Dropout(p=float(dropout_rate)), nn.Linear(in_features, num_classes))
+                else:
+                    model.fc = nn.Linear(in_features, num_classes)
             else:
                 # Fallback to your custom implementation (may OOM on 224x224 if not ImageNet-stem)
                 if depth == 18:
