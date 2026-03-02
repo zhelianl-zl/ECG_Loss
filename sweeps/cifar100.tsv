@@ -1,10 +1,10 @@
 #wandb_project=ecg-cifar100-pmax
 dataset	seed	stop	stop_val	lr	momentum	batch	workers	half_prec	variants	type	pe_mode	stage1_epochs	stage2_epochs	loss_stage1	loss_stage2	ecg_conf_type	ecg_detach_gates	ecg_schedule	ecg_lam_start	ecg_lam_end	ecg_tau_start	ecg_tau_end	ecg_k_start	ecg_k_end	force_run	method_name	run_kind
-cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	15	45	ce	ecg	pmax	True	linear	0.00	1.20	0.75	0.95	12	35	True	c100_ref_base_tau75_95	ablation2
-cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	15	45	ce	ecg	pmax	True	linear	0.00	1.20	0.72	0.94	12	35	True	c100_ref_tau72_94	ablation2
-cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	15	45	ce	ecg	pmax	True	linear	0.00	1.20	0.70	0.93	12	35	True	c100_ref_tau70_93	ablation2
-cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	15	45	ce	ecg	pmax	True	linear	0.00	1.20	0.78	0.96	12	35	True	c100_ref_tau78_96	ablation2
-cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	15	45	ce	ecg	pmax	True	linear	0.00	1.00	0.75	0.95	12	35	True	c100_ref_lamEnd1p0	ablation2
-cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	15	45	ce	ecg	pmax	True	linear	0.00	1.40	0.75	0.95	12	35	True	c100_ref_lamEnd1p4	ablation2
-cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	15	45	ce	ecg	pmax	True	linear	0.00	1.20	0.75	0.95	8	25	True	c100_ref_k8_25	ablation2
-cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	15	45	ce	ecg	pmax	True	cosine	0.00	1.20	0.75	0.95	12	35	True	c100_ref_cos_tau75_95	ablation2
+cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	15	45	ce	ecg	pmax	True	linear	0.00	1.20	0.75	0.95	12	35	True	c100_ctrl_tau75_95_lam1p2_k12_35	ablation3
+cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	15	45	ce	ecg	pmax	True	linear	0.00	1.40	0.75	0.95	12	35	True	c100_try_tau75_95_lam1p4_k12_35	ablation3
+cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	15	45	ce	ecg	pmax	True	linear	0.00	1.30	0.75	0.95	12	35	True	c100_try_tau75_95_lam1p3_k12_35	ablation3
+cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	15	45	ce	ecg	pmax	True	linear	0.00	1.50	0.75	0.95	12	35	True	c100_try_tau75_95_lam1p5_k12_35	ablation3
+cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	15	45	ce	ecg	pmax	True	linear	0.20	1.40	0.75	0.95	12	35	True	c100_try_tau75_95_lam0p2_1p4_k12_35	ablation3
+cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	15	45	ce	ecg	pmax	True	linear	0.00	1.40	0.74	0.94	12	35	True	c100_try_tau74_94_lam1p4_k12_35	ablation3
+cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	15	45	ce	ecg	pmax	True	linear	0.00	1.40	0.76	0.95	12	35	True	c100_try_tau76_95_lam1p4_k12_35	ablation3
+cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	15	45	ce	ecg	pmax	True	linear	0.00	1.40	0.75	0.95	10	40	True	c100_try_tau75_95_lam1p4_k10_40	ablation3
