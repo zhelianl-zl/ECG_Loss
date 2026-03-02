@@ -1054,17 +1054,24 @@ class dataset():
                 crop_size = 224
 
                 normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+                # --- ImageFolder scan can be slow on shared FS; time it for debugging ---
+                _t_scan = time.time()
+                print(f"[DATA] Building ImageFolder train from: {traindir}", flush=True)
                 self.data_train = datasets.ImageFolder( traindir, transforms.Compose([
                         transforms.RandomResizedCrop(crop_size),
                         transforms.RandomHorizontalFlip(),
                         transforms.ToTensor(),normalize,
                     ]))
+                print(f"[DATA] Train ImageFolder ready: {len(self.data_train)} samples, took {time.time()-_t_scan:.1f}s", flush=True)
 
+                _t_scan_val = time.time()
+                print(f"[DATA] Building ImageFolder val from: {valdir}", flush=True)
                 self.data_test = datasets.ImageFolder(valdir, transforms.Compose([
                         transforms.Resize(256),
                         transforms.CenterCrop(crop_size),
                         transforms.ToTensor(),normalize,
                     ]))
+                print(f"[DATA] Val ImageFolder ready: {len(self.data_test)} samples, took {time.time()-_t_scan_val:.1f}s", flush=True)
 
             else:
                 print("Downsampled dataset")
@@ -1083,9 +1090,10 @@ class dataset():
 
             self.data_val = self.data_test
 
-            # DataLoader performance knobs (set DL_WORKERS env; default 0)
-            DL_WORKERS = int(os.environ.get("DL_WORKERS", "0"))
+            # DataLoader performance knobs (set DL_WORKERS env; default 5)
+            DL_WORKERS = int(os.environ.get("DL_WORKERS", "5"))
             DL_WORKERS = max(DL_WORKERS, 0)
+            print(f"[DATA] DataLoader: num_workers={DL_WORKERS} pin_memory=True persistent_workers={DL_WORKERS>0}", flush=True)
             DL_KW = dict(
                 pin_memory=True,
                 num_workers=DL_WORKERS,
@@ -2930,6 +2938,9 @@ class trainModel():
         total_loss, total_err = 0.,0.
         misclassified_ids = []
 
+        LOG_EVERY = int(os.environ.get("LOG_EVERY", "100"))  # print first few steps and every N iters
+        EMPTY_CACHE_EVERY = int(os.environ.get("EMPTY_CACHE_EVERY", "0"))  # 0 disables empty_cache in loop
+        _t_batch_start = time.time()
         for ct, (X,y) in enumerate(loader):
             if (not getattr(self, "_debug_shape_printed", False)) and (os.environ.get("DEBUG_IMAGENET_SHAPE", "0").lower() in ("1","true","yes","y")):
                 try:
@@ -2937,7 +2948,9 @@ class trainModel():
                 except Exception:
                     print("[DEBUG] first batch shape print failed")
                 self._debug_shape_printed = True
-            X,y = X.to(self.device), y.to(self.device) # len of bacth size
+            _fetch_s = time.time() - _t_batch_start
+            _t_step0 = time.time()
+            X,y = X.to(self.device, non_blocking=True), y.to(self.device, non_blocking=True) # len of bacth size
             if self.half_prec: 
                 # Runs the forward pass with autocasting.
                 with torch.cuda.amp.autocast(dtype=torch.float16):
@@ -2983,9 +2996,25 @@ class trainModel():
             total_err += misclassified.sum().item()
             if opt:  # backpropagation
                 total_loss += loss.item() * X.shape[0]
+            # --- lightweight progress logging (helps diagnose IO stalls) ---
+            if opt and (ct < 5 or ((ct + 1) % max(LOG_EVERY, 1) == 0)):
+                try:
+                    if getattr(self.device, "type", "") == "cuda":
+                        torch.cuda.synchronize()
+                    _step_s = time.time() - _t_step0
+                    _loss_val = float(loss.detach().item()) if "loss" in locals() else float("nan")
+                    _err_frac = float(misclassified.float().mean().item()) if misclassified.numel() > 0 else 0.0
+                    _mem_g = torch.cuda.memory_allocated() / (1024**3) if torch.cuda.is_available() else 0.0
+                    _maxmem_g = torch.cuda.max_memory_allocated() / (1024**3) if torch.cuda.is_available() else 0.0
+                    _imgs_s = float(X.size(0)) / max(_step_s, 1e-6)
+                    print(f"[STEP] it={ct:05d} fetch={_fetch_s:.3f}s step={_step_s:.3f}s imgs/s={_imgs_s:.1f} loss={_loss_val:.4f} err={_err_frac:.3f} mem={_mem_g:.2f}G max={_maxmem_g:.2f}G", flush=True)
+                except Exception as _e:
+                    print(f"[STEP] log failed: {_e}", flush=True)
 
             del X, y, misclassified, batch_misclassified_ids
-            torch.cuda.empty_cache()
+            if EMPTY_CACHE_EVERY > 0 and ((ct + 1) % EMPTY_CACHE_EVERY == 0):
+                torch.cuda.empty_cache()
+            _t_batch_start = time.time()
 
 
         return total_err / len(loader.dataset), total_loss / len(loader.dataset), misclassified_ids
