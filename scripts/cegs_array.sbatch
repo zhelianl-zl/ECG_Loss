@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH -N 1
-#SBATCH -t 08:00:00
+#SBATCH -t 24:00:00
 #SBATCH -J cegs
 #SBATCH -o slurm_logs/slurm_%x_%A_%a.out
 #SBATCH -e slurm_logs/slurm_%x_%A_%a.err
@@ -111,7 +111,7 @@ export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:T
 
 export IMAGENET_ORIGINAL=1
 export IMAGENET_TORCHVISION=1
-export IMAGENET_ROOT=/path/to/imagenet_root   # 这个目录里应有 train/ 和 val/
+export IMAGENET_ROOT=/ocean/projects/cis260049p/zliu49/cegs_data/imageNet
 export DL_WORKERS=5                            # 可选
 export DEBUG_IMAGENET_SHAPE=1                  # 可选，确认 224
 
