@@ -27,7 +27,7 @@ ACCOUNT="${ACCOUNT:-cis260049p}"
 PARTITION="${PARTITION:-GPU-shared}"
 QOS="${QOS:-}"
 GRES="${GRES:-gpu:v100-32:1}"
-TIME="${TIME:-08:00:00}"
+TIME="${TIME:-1-00:00:00}"
 
 
 # QOS handling:
