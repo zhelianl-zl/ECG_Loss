@@ -682,12 +682,25 @@ class DEUP():
         self.f_predictor = f_model
         self.f_optimizer = f_optim
         self.e_predictor = ResNet(BasicBlock, [2, 2, 2, 2], 1, 18, 0.0).to(self.device) #create_network2(1, 1, 1024, 'relu', False, 5).to(self.device)
-        self.e_optimizer =  optim.SGD(self.e_predictor.parameters(), lr=0.001, momentum=0.9)
+        # Keep DEUP LR identical to the base model LR (stage-1 LR) and fixed across stages
+        self.base_lr = float(self.f_optimizer.param_groups[0].get('lr', 0.1))
+        self.e_optimizer = optim.SGD(self.e_predictor.parameters(), lr=self.base_lr, momentum=0.9)
 
         self.loss_fn=nn.CrossEntropyLoss(reduction='none')
         self.e_loss_fn=nn.MSELoss()
 
         self.percentage_valSet = 0.1
+
+    def _lock_e_lr(self):
+        """Force DEUP optimizer LR to stay equal to the base model LR."""
+        try:
+            # Refresh base_lr from the base model optimizer (in case the caller changed it)
+            self.base_lr = float(self.f_optimizer.param_groups[0].get('lr', self.base_lr))
+            for pg in self.e_optimizer.param_groups:
+                pg['lr'] = float(self.base_lr)
+        except Exception:
+            pass
+
 
 
     def train(self, algorithm=None, epsilon=0.1, num_iter=20, alpha=0.01):
@@ -718,6 +731,8 @@ class DEUP():
 
     def fit_uncertainty_estimator_dataloader(self, data, epochs=None, batch_size=128, data_test=None):
 
+        self._lock_e_lr()
+
         train_loader = DataLoader(data, shuffle=True, batch_size=batch_size)
         if data_test is not None: test_loader = DataLoader(data, shuffle=True, batch_size=batch_size)
 
@@ -741,6 +756,7 @@ class DEUP():
         self.e_predictor.train()
         train_losses = []
         for epoch in range(epochs):
+            self._lock_e_lr()
             epoch_losses = []
             e_loss_sum, j = 0, 0
             for features, target in loader: # target here is the loss of the base model
@@ -780,6 +796,8 @@ class DEUP():
 
     def fit_uncertainty_estimator_dataloader_adversarial(self, data, epochs=None, batch_size=128, data_test=None, algorithm='fgsm', epsilon=0.1, num_iter=20, alpha=0.01):
 
+        self._lock_e_lr()
+
         train_loader = DataLoader(data, shuffle=True, batch_size=batch_size)
         if data_test is not None: test_loader = DataLoader(data, shuffle=True, batch_size=batch_size)
 
@@ -810,6 +828,7 @@ class DEUP():
         self.e_predictor.train()
         train_losses = []
         for epoch in range(epochs):
+            self._lock_e_lr()
             epoch_losses = []
             e_loss_sum, j = 0, 0
             for features, target in loader: # target here is the loss of the base model
@@ -1817,6 +1836,20 @@ class trainModel():
         if runName  is None: runName  = modelName
         if self.deep_ensemble:
             return self.standard_train_deep_ensemble(model, modelName, loader, dataset, opt, iterations)
+
+        # ------------------------------------------------------------------
+        # IMPORTANT: keep a constant learning rate across BOTH stages.
+        # Some older edits used lr/10.0 for stage2; this block makes the
+        # behavior explicit and robust (even if something else mutates lr).
+        # We take the *current* optimizer lr (after optional ckpt resume)
+        # as the single source of truth.
+        # ------------------------------------------------------------------
+        def _force_opt_lr(_opt, _lr: float):
+            try:
+                for pg in _opt.param_groups:
+                    pg["lr"] = float(_lr)
+            except Exception:
+                pass
         
         if "binaryCifar10" in modelName: num_classes=2
         elif "cifar100" in modelName: num_classes=100
@@ -1845,6 +1878,8 @@ class trainModel():
                 t1 = time.time()-trainTime
                 model = _model
                 opt = _opt
+                # If we resumed, refresh lr from the resumed optimizer.
+                lr = opt.param_groups[0].get('lr', lr)
                 counter += 1
                 # ===== W&B anchor: 补打一条 step=it（通常就是 30）=====
                 try:
@@ -1870,6 +1905,9 @@ class trainModel():
         for counter in range(it+1, iterations+1):
             if counter == iterations: write_pred_logs = True
             print("epoch number " + str(counter))
+
+            # Enforce constant lr (stage1)
+            _force_opt_lr(opt, lr)
 
             self._ecg_on_epoch_begin(counter)
 
@@ -1907,8 +1945,8 @@ class trainModel():
 
         #opt = optim.Adam(model.parameters(), lr=lr/10.0)
 
-        for param_group in opt.param_groups:
-            param_group["lr"] = lr #lr/10.0
+        # Enforce constant lr at stage boundary (stage2 start)
+        _force_opt_lr(opt, lr)
 
         write_pred_logs = True
 
@@ -1959,6 +1997,9 @@ class trainModel():
             while epoch_counter < max_stage2_epochs+1:
 
                 global_epoch = epoch_counter + iterations
+
+                # Enforce constant lr (stage2)
+                _force_opt_lr(opt, lr)
 
                 if counter_dataSize == 0 and counter_repeat == 0:
 
