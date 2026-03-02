@@ -109,6 +109,11 @@ export CUBLAS_WORKSPACE_CONFIG=:4096:8
 export PYTHONHASHSEED=0
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 
+export IMAGENET_ORIGINAL=1
+export IMAGENET_TORCHVISION=1
+# 可选：打印首个batch形状
+export DEBUG_IMAGENET_SHAPE=1
+
 # Activate conda env (Python 3.10)
 source "$HOME/miniconda3/etc/profile.d/conda.sh"
 conda activate cegs

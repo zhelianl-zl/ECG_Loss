@@ -1,10 +1,10 @@
 #wandb_project=ecg-svhn-pmax
 dataset	seed	stop	stop_val	lr	momentum	batch	workers	half_prec	variants	type	pe_mode	stage1_epochs	stage2_epochs	loss_stage1	loss_stage2	ecg_conf_type	ecg_detach_gates	ecg_schedule	ecg_lam_start	ecg_lam_end	ecg_tau_start	ecg_tau_end	ecg_k_start	ecg_k_end	force_run	method_name	run_kind
-svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.06	0.26	0.70	0.95	6	12	True	svhn_pmax_lin_comboA_lam06_26_tau70_95_k6_12	ablation
-svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.08	0.30	0.70	0.95	6	12	True	svhn_pmax_lin_comboB_lam08_30_tau70_95_k6_12	ablation
-svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.06	0.26	0.68	0.93	6	12	True	svhn_pmax_lin_tau68_93_lam06_26_k6_12	ablation
-svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.06	0.26	0.72	0.96	6	12	True	svhn_pmax_lin_tau72_96_lam06_26_k6_12	ablation
-svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.06	0.26	0.70	0.95	4	10	True	svhn_pmax_lin_k4_10_lam06_26_tau70_95	ablation
-svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.06	0.26	0.70	0.95	8	16	True	svhn_pmax_lin_k8_16_lam06_26_tau70_95	ablation
-svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.00	0.26	0.70	0.95	6	12	True	svhn_pmax_lin_warmLam0_26_tau70_95_k6_12	ablation
-svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	cosine	0.06	0.26	0.70	0.95	6	12	True	svhn_pmax_cos_comboA_lam06_26_tau70_95_k6_12	ablation
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.05	0.20	0.75	0.98	7	14	True	svhn_pmax_lin_k7_14_lam05_20_tau75_98	ablation
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.05	0.20	0.75	0.98	6	12	True	svhn_pmax_lin_k6_12_lam05_20_tau75_98	ablation
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.05	0.20	0.75	0.98	8	16	True	svhn_pmax_lin_k8_16_lam05_20_tau75_98	ablation
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.05	0.20	0.73	0.97	7	14	True	svhn_pmax_lin_tau73_97_k7_14_lam05_20	ablation
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.05	0.20	0.77	0.99	7	14	True	svhn_pmax_lin_tau77_99_k7_14_lam05_20	ablation
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.04	0.18	0.75	0.98	7	14	True	svhn_pmax_lin_lam04_18_k7_14_tau75_98	ablation
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.06	0.24	0.75	0.98	7	14	True	svhn_pmax_lin_lam06_24_k7_14_tau75_98	ablation
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	cosine	0.05	0.20	0.75	0.98	7	14	True	svhn_pmax_cos_k7_14_lam05_20_tau75_98	ablation
