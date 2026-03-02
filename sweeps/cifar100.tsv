@@ -1,11 +1,10 @@
 #wandb_project=ecg-cifar100-pmax
 dataset	seed	stop	stop_val	lr	momentum	batch	workers	half_prec	variants	type	pe_mode	stage1_epochs	stage2_epochs	loss_stage1	loss_stage2	ecg_conf_type	ecg_detach_gates	ecg_schedule	ecg_lam_start	ecg_lam_end	ecg_tau_start	ecg_tau_end	ecg_k_start	ecg_k_end	force_run	method_name	run_kind
-cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	15	45	ce	ecg	pmax	True	linear	0.00	1.20	0.80	0.97	12	35	True	c100_pmax_lin_base	ablation
-cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	15	45	ce	ecg	pmax	True	linear	0.00	0.80	0.80	0.97	12	35	True	c100_pmax_lin_lam0_0p8	ablation
-cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	15	45	ce	ecg	pmax	True	linear	0.00	1.60	0.80	0.97	12	35	True	c100_pmax_lin_lam0_1p6	ablation
-cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	15	45	ce	ecg	pmax	True	linear	0.00	1.20	0.75	0.95	12	35	True	c100_pmax_lin_tau75_95	ablation
-cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	15	45	ce	ecg	pmax	True	linear	0.00	1.20	0.85	0.98	12	35	True	c100_pmax_lin_tau85_98	ablation
-cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	15	45	ce	ecg	pmax	True	linear	0.00	1.20	0.80	0.97	8	25	True	c100_pmax_lin_k8_25	ablation
-cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	15	45	ce	ecg	pmax	False	linear	0.00	1.20	0.80	0.97	12	35	True	c100_pmax_lin_detachF	ablation
-cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	15	45	ce	ecg	pmax	True	cosine	0.00	1.20	0.80	0.97	12	35	True	c100_pmax_cos_base	ablation
-cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	60	0	ce	ce	none	True	none	0.00	0.00	0.00	0.00	0	0	True	c100_ce_baseline	baseline
+cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.00	1.20	0.45	0.90	8	30	True	c100_allECG_lin_base	ablation
+cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.00	0.80	0.45	0.90	8	30	True	c100_allECG_lin_lam0_0p8	ablation
+cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.00	1.60	0.45	0.90	8	30	True	c100_allECG_lin_lam0_1p6	ablation
+cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.00	1.20	0.35	0.85	8	30	True	c100_allECG_lin_tau35_85	ablation
+cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.00	1.20	0.55	0.92	8	30	True	c100_allECG_lin_tau55_92	ablation
+cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.00	1.20	0.45	0.90	6	20	True	c100_allECG_lin_k6_20	ablation
+cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	cosine	0.00	1.20	0.45	0.90	8	30	True	c100_allECG_cos_base	ablation
+cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	False	linear	0.00	1.20	0.45	0.90	8	30	True	c100_allECG_lin_detachF	ablation
