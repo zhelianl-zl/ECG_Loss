@@ -25,9 +25,21 @@ fi
 # Slurm defaults (override via env if needed)
 ACCOUNT="${ACCOUNT:-cis260049p}"
 PARTITION="${PARTITION:-GPU-shared}"
-QOS="${QOS:-gpu}"
+QOS="${QOS:-}"
 GRES="${GRES:-gpu:v100-32:1}"
 TIME="${TIME:-08:00:00}"
+
+
+# QOS handling:
+# - On Bridges-2, GPU/GPU-shared typically accept QOS=gpu.
+# - GPU-dev (A100) often rejects QOS; leave empty to omit --qos.
+if [[ -z "$QOS" && "$PARTITION" != "GPU-dev" ]]; then
+  QOS="gpu"
+fi
+QOS_ARGS=()
+if [[ -n "$QOS" ]]; then
+  QOS_ARGS+=(--qos="$QOS")
+fi
 
 BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONF="$BASE/$CONF_PATH"
@@ -104,7 +116,7 @@ export WANDB_JOB_TYPE_DEFAULT="${WANDB_JOB_TYPE_DEFAULT:-official}"
 echo "BASE=$BASE"
 echo "CONF=$CONF"
 echo "Tasks=$N  MaxParallel=$MAX_PARALLEL"
-echo "ACCOUNT=$ACCOUNT PARTITION=$PARTITION QOS=$QOS GRES=$GRES TIME=$TIME"
+echo "ACCOUNT=$ACCOUNT PARTITION=$PARTITION QOS=${QOS:-<none>} GRES=$GRES TIME=$TIME"
 echo "DATA_DIR=$DATA_DIR"
 echo "RUNS_DIR=$RUNS_DIR"
 echo "WANDB_MODE=$WANDB_MODE WANDB_ENTITY=${WANDB_ENTITY:-<empty>} WANDB_PROJECT_DEFAULT=$WANDB_PROJECT_DEFAULT"
@@ -114,7 +126,7 @@ echo
 sbatch \
   -A "$ACCOUNT" \
   -p "$PARTITION" \
-  --qos="$QOS" \
+  "${QOS_ARGS[@]}" \
   --gres="$GRES" \
   -t "$TIME" \
   --export=ALL \
