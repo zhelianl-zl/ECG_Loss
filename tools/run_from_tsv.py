@@ -272,12 +272,14 @@ def main() -> None:
     if not group:
         group = f"j{array_job}"
 
-    # tags (optional)
+    # tags (optional); wandb allows max 64 chars per tag
+    WANDB_MAX_TAG_LEN = 64
     tags = [
         run_kind, dataset, f"s{seed}", method_name,
         f"T{stop_val or 'T?'}", f"s1{e1}", f"s2{e2}",
         f"conf-{conf_safe}", f"sch-{sch}",
     ]
+    tags = [str(t)[:WANDB_MAX_TAG_LEN] for t in tags if t]
 
     # W&B env
     os.environ["WANDB_PROJECT"] = project
