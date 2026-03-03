@@ -1982,9 +1982,19 @@ class trainModel():
             counter_repeat = 0
             half_batch_size=int(loader.batch_size/2)
 
-            max_stage2_epochs = int(self.new_iterations) 
+            max_stage2_epochs = int(self.new_iterations)
+            # stage2_fast: reuse wrong/correct split every N epochs to cut full-train passes
+            stage2_fast = getattr(self, "stage2_fast", False)
+            stage2_find_every = getattr(self, "stage2_find_every", 3)
+            stage2_ce_log_every = getattr(self, "stage2_ce_log_every", 5)
+            _last_misclassified_ids = None
+            _last_aux_correctclassified_ids = None
+            _last_ce_loss = None
+            _last_ce_err = None
 
             print("epoch number " + str(epoch_counter+iterations) + " and epoch size of " + str(epoch_dataSize))
+            if stage2_fast:
+                print(f"[STAGE2] fast mode: find wrong every {stage2_find_every} epochs, log train CE every {stage2_ce_log_every} epochs", flush=True)
             while epoch_counter < max_stage2_epochs+1:
 
                 global_epoch = epoch_counter + iterations
@@ -1994,9 +2004,16 @@ class trainModel():
                     self._ecg_on_epoch_begin(global_epoch)
                 if self.printTimes: t1_init = time.time()
                 if counter_repeat==0:
-                    _, _, misclassified_ids = self.epoch(loader.train_loader, model) #test with training data
-
-                    aux_correctclassified_ids = [i for i in range(epoch_dataSize) if i not in misclassified_ids]
+                    # Run full-train "find misclassified" every stage2_find_every epochs when stage2_fast (epoch 1 always)
+                    run_find = (not stage2_fast) or (epoch_counter == 1) or ((epoch_counter - 1) % stage2_find_every == 0)
+                    if run_find or _last_misclassified_ids is None:
+                        _, _, misclassified_ids = self.epoch(loader.train_loader, model) #test with training data
+                        _last_misclassified_ids = misclassified_ids
+                        aux_correctclassified_ids = [i for i in range(epoch_dataSize) if i not in misclassified_ids]
+                        _last_aux_correctclassified_ids = aux_correctclassified_ids
+                    else:
+                        misclassified_ids = _last_misclassified_ids
+                        aux_correctclassified_ids = _last_aux_correctclassified_ids
                     size2include = len(misclassified_ids) if len(misclassified_ids) > half_batch_size else loader.batch_size-len(misclassified_ids)
 
                     # update loss fucntion and train with wrong predicitons
@@ -2026,17 +2043,25 @@ class trainModel():
                     test_err, _, test_entropy, test_MI, _, _, _, _ = self.testModel_logs(dataset, runName, epoch_counter+iterations, 'standard', 0 ,0, 0, 0, 0, time.time() - t1, write_pred_logs, num_samples=num_samples)
                     test_unc = test_entropy if UNCERTAINTY_MEASURE == 'PE' else test_MI
 
-                    # ===== SAVE CKPT in STAGE2 (every 5 global epochs + last) =====
                     last_global_epoch = iterations + max_stage2_epochs   # e.g. 30 + 30 = 60
+                    # Run full-train compute_train_ce_err every stage2_ce_log_every epochs when stage2_fast (first & last stage2 epoch always)
+                    run_ce_log = (not stage2_fast) or (epoch_counter == 1) or (global_epoch % stage2_ce_log_every == 0) or (global_epoch == last_global_epoch)
+                    if run_ce_log:
+                        ce_loss, ce_err = self.compute_train_ce_err(loader.train_loader, model)
+                        _last_ce_loss, _last_ce_err = ce_loss, ce_err
+                    else:
+                        ce_loss = _last_ce_loss if _last_ce_loss is not None else 0.0
+                        ce_err = _last_ce_err if _last_ce_err is not None else 0.0
+
+                    # ===== SAVE CKPT in STAGE2 (every 5 global epochs + last) =====
                     if (global_epoch % 5 == 0) or (global_epoch == last_global_epoch):
                         print(f"[STAGE2] saving model on epoch {global_epoch}", flush=True)
                         self.saveModel(True, {
                             'epoch': global_epoch,
                             'state_dict': model.state_dict(),
                             'training_time': time.time() - t1,
-                            # 这里 stage2 没有 train_err/train_loss 的同名变量，建议存 CE 的 train 统计或存 test_err
-                            'error': float(test_err),     # 先存 test_err 也行
-                            'loss':  float(ce_loss) if 'ce_loss' in locals() else 0.0,
+                            'error': float(test_err),
+                            'loss':  float(ce_loss),
                             'optimizer': opt.state_dict(),
                         }, ckptName, global_epoch)
                     # =============================================================
@@ -2044,7 +2069,6 @@ class trainModel():
                     # ---- log train metrics for stage2 ----
                     global_step = epoch_counter + iterations   # 31..60
                     self._ecg_on_epoch_end(global_step, metric=test_err)
-                    ce_loss, ce_err = self.compute_train_ce_err(loader.train_loader, model)
 
                     try:
                         if wandb.run is not None:
@@ -4814,7 +4838,8 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
          ecg_schedule, ecg_lam_start, ecg_lam_end, ecg_tau_start, ecg_tau_end, ecg_k_start, ecg_k_end, ecg_adapt_warmup, ecg_adapt_window,
          ecg_tau_target, ecg_tau_lr, ecg_tau_ema, ecg_tau_deadzone, ecg_tau_min, ecg_tau_max,
          device, devices_id, lr, momentum, batch, lr_adv, momentum_adv, batch_adv,
-         half_prec=False, variants='none', log_runtime=True, rt_sample_every=20):
+         half_prec=False, variants='none', log_runtime=True, rt_sample_every=20,
+         stage2_fast=False, stage2_find_every=3, stage2_ce_log_every=5):
     
     dataset_loader = dataset(dataset_name=dataset_name, batch_size = batch, batch_size_adv = batch_adv)
     model_cnn = model(dataset_loader, dataset_name, device, devices_id, lr, momentum, lr_adv, momentum_adv, batch_adv, half_prec=half_prec, variants=variants)
@@ -4861,6 +4886,11 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
     # runtime diagnostics config
     model_cnn.log_runtime = bool(log_runtime)
     model_cnn.rt_sample_every = int(rt_sample_every)
+
+    # stage2 speed: reduce full-train passes for large datasets (e.g. ImageNet32)
+    model_cnn.stage2_fast = bool(stage2_fast)
+    model_cnn.stage2_find_every = int(stage2_find_every)
+    model_cnn.stage2_ce_log_every = int(stage2_ce_log_every)
 
     #trainTime, train_err, train_loss = model_cnn.run(modelName, iterations=int(stage1_epochs), stop=stop)
     model_cnn.run(runName, iterations=int(stage1_epochs), stop=stop, ckptName=ckptName, runName=runName)
@@ -5006,6 +5036,14 @@ if __name__ == '__main__':
     parser.add_argument("--imb_seed", type=int, default=None, help="Seed for imbalance sampling.")
     parser.add_argument("--dump_gates", type=str2bool, default=False, help="Dump gate stats for demo.")
     parser.add_argument("--dump_gates_n", type=int, default=2000, help="Number of samples for dump_gates.")
+
+    # ---- stage2 speed (reduce full passes for large datasets e.g. ImageNet32) ----
+    parser.add_argument("--stage2_fast", type=str2bool, default=False,
+                        help="Reduce stage2 full passes: find misclassified every N epochs, log train CE every M.")
+    parser.add_argument("--stage2_find_every", type=int, default=3,
+                        help="When stage2_fast: run full-train 'find wrong' pass every this many epochs (reuse split otherwise).")
+    parser.add_argument("--stage2_ce_log_every", type=int, default=5,
+                        help="When stage2_fast: run compute_train_ce_err every this many epochs (reuse last for W&B otherwise).")
 
     parser.add_argument("--force_run", action="store_true")
 
@@ -5234,5 +5272,6 @@ if __name__ == "__main__":
         args.lr, args.momentum, args.batch,
         args.lr_adv, args.momentum_adv, args.batch_adv,
         args.half_prec, args.variants,
-        args.log_runtime, args.rt_sample_every
+        args.log_runtime, args.rt_sample_every,
+        args.stage2_fast, args.stage2_find_every, args.stage2_ce_log_every
     )
