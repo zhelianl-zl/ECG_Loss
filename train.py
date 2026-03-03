@@ -5049,6 +5049,9 @@ def init_wandb_if_needed(args, default_name: str):
         f"loss2_{args.loss_stage2}", f"pe_{args.pe_mode}",
     }
     tags = sorted(set(tags) | base_tags)
+    # wandb allows tags between 1 and 64 chars
+    WANDB_MAX_TAG_LEN = 64
+    tags = [t[:WANDB_MAX_TAG_LEN] if len(t) > WANDB_MAX_TAG_LEN else t for t in tags]
 
     job_type = os.environ.get("WANDB_JOB_TYPE", None)
 
@@ -5124,6 +5127,9 @@ def init_wandb_if_needed(args, default_name: str):
         f"loss2_{args.loss_stage2}", f"pe_{args.pe_mode}",
     }
     tags = sorted(set(tags) | base_tags)
+    # wandb allows tags between 1 and 64 chars
+    WANDB_MAX_TAG_LEN = 64
+    tags = [t[:WANDB_MAX_TAG_LEN] if len(t) > WANDB_MAX_TAG_LEN else t for t in tags]
 
     wandb.init(
         project=project,
