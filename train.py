@@ -675,6 +675,34 @@ class CIFAR10C(VisionDataset):
         return len(self.data)
 
 
+class CIFAR100C(VisionDataset):
+    """CIFAR-100-C corruption dataset (same layout as CIFAR-10-C: one .npy per corruption)."""
+    corruptions = ['natural', 'gaussian_noise', 'shot_noise', 'impulse_noise', 'defocus_blur', 'glass_blur',
+                   'motion_blur', 'zoom_blur', 'snow', 'frost', 'fog', 'brightness', 'contrast',
+                   'elastic_transform', 'pixelate', 'jpeg_compression', 'speckle_noise', 'gaussian_blur', 'spatter', 'saturate']
+
+    def __init__(self, root: str, name: str, transform=None, target_transform=None):
+        assert name in self.corruptions
+        dir_path = os.path.join(root, 'CIFAR-100-C')
+        super(CIFAR100C, self).__init__(dir_path, transform=transform, target_transform=target_transform)
+        data_path = os.path.join(dir_path, name + '.npy')
+        target_path = os.path.join(dir_path, 'labels.npy')
+        self.data = np.load(data_path)
+        self.targets = np.load(target_path)
+
+    def __getitem__(self, index):
+        img, target = self.data[index], self.targets[index]
+        img = Image.fromarray(img)
+        if self.transform is not None:
+            img = self.transform(img)
+        if self.target_transform is not None:
+            target = self.target_transform(target)
+        return img, target
+
+    def __len__(self):
+        return len(self.data)
+
+
 class DEUP():
     def __init__(self, trainloader, f_model, f_optim, device):
         self.trainloader = trainloader
@@ -1922,6 +1950,9 @@ class trainModel():
                 print("[W&B log skipped]", e, flush=True)
             # ==========================================
 
+            # RunA/RunB: extra evals every eval_extra_every epochs (ADV/, C/, LT/ in W&B)
+            self._run_extra_evals(counter, dataset, model, loader)
+
             if counter % 5 == 0 or counter == iterations:
                 print("saving model on epoch " + str(counter))
 
@@ -2126,7 +2157,10 @@ class trainModel():
 
 
                     print("epoch number " + str(epoch_counter+iterations))
-                    if self.printTimes: print('time testing ' + str( time.time() - t1_init )) 
+                    if self.printTimes: print('time testing ' + str( time.time() - t1_init ))
+
+                    # RunA/RunB: extra evals every eval_extra_every epochs in stage2
+                    self._run_extra_evals(global_step, dataset, model, loader)
 
                 #del _subset_wrong,_subset_correct, _train_loader_wrong, _train_loader_correct
                 #torch.cuda.empty_cache()
@@ -3848,6 +3882,121 @@ class trainModel():
 
         return test_err, test_loss, test_entropy, test_MI, adv_err, adv_loss, adv_entropy, adv_MI
 
+    def _run_extra_evals(self, global_epoch, dataset_name, model, loader):
+        """Run ADV suite, C-suite, and LT metrics every eval_extra_every epochs; log to wandb with ADV/, C/, LT/ prefixes."""
+        eval_extra_every = int(getattr(self, "eval_extra_every", 0))
+        if eval_extra_every <= 0 or (global_epoch % eval_extra_every != 0):
+            return
+        eval_adv_suite = getattr(self, "eval_adv_suite", False)
+        adv_attacks_str = getattr(self, "adv_attacks", "fgsm,pgd_linf,pgd_linf_rs")
+        adv_eps = float(getattr(self, "adv_eps", 8))
+        adv_steps = int(getattr(self, "adv_steps", 20))
+        adv_pixel = getattr(self, "adv_pixel", True)
+        eval_c_suite = getattr(self, "eval_c_suite", False)
+        c_corruptions_str = getattr(self, "c_corruptions", "gaussian_noise,brightness")
+        c_severities = int(getattr(self, "c_severities", 5))
+        imbalance = (getattr(self, "imbalance", "none") or "none").strip().lower()
+
+        to_log = {}
+        num_samples = 5
+
+        # ---- ADV suite (all datasets) ----
+        if eval_adv_suite and loader.test_loader is not None:
+            eps_01 = (adv_eps / 255.0) if adv_pixel else adv_eps
+            if dataset_name == "mnist":
+                eps_01 = adv_eps  # MNIST often in 0-1
+            alpha = (eps_01 * 2.5 / max(adv_steps, 1)) if adv_steps else 0.01
+            for attack_name in [a.strip() for a in adv_attacks_str.split(",") if a.strip()]:
+                attack_type = "pgd_linf" if attack_name == "pgd_linf" else ("pgd_linf_rs" if attack_name == "pgd_linf_rs" else "fgsm")
+                try:
+                    adv_err, adv_loss, _, _, _ = self.test_epoch_adversarial(
+                        loader.test_loader, model, epsilon=eps_01, num_iter=adv_steps, alpha=alpha,
+                        num_samples=num_samples, return_details=True, attack_type=attack_type
+                    )
+                    prefix = f"ADV/{attack_name}/eps{int(adv_eps)}"
+                    if "pgd" in attack_name:
+                        prefix += f"/steps{adv_steps}"
+                    to_log[f"{prefix}/Error"] = float(adv_err)
+                    to_log[f"{prefix}/Acc"] = float(1.0 - adv_err)
+                    to_log[f"{prefix}/Loss"] = float(adv_loss)
+                except Exception as e:
+                    print(f"[extra_evals] ADV {attack_name} failed: {e}", flush=True)
+
+        # ---- C-suite (CIFAR10 / CIFAR100 only) ----
+        if eval_c_suite and dataset_name in ("cifar10", "cifar100"):
+            data_root = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(__file__), "..", "data"))
+            if not os.path.isdir(data_root):
+                data_root = "../data"
+            sev = min(5, max(1, c_severities))
+            test_transform = loader.test_loader.dataset.transform if hasattr(loader.test_loader.dataset, "transform") else None
+            if test_transform is None:
+                cifar10_mean, cifar10_std = (0.4914, 0.4822, 0.4465), (0.2471, 0.2435, 0.2616)
+                cifar100_mean, cifar100_std = (0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761)
+                mean, std = (cifar10_mean, cifar10_std) if dataset_name == "cifar10" else (cifar100_mean, cifar100_std)
+                test_transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean, std)])
+            for corr in [c.strip() for c in c_corruptions_str.split(",") if c.strip()]:
+                try:
+                    if dataset_name == "cifar10":
+                        C_dataset = CIFAR10C(data_root, name=corr, transform=test_transform)
+                    else:
+                        C_dataset = CIFAR100C(data_root, name=corr, transform=test_transform)
+                    n_total = len(C_dataset)
+                    n_per_sev = 10000
+                    if n_total >= n_per_sev * 5:
+                        indices = list(range((sev - 1) * n_per_sev, min(sev * n_per_sev, n_total)))
+                        C_dataset = Subset(C_dataset, indices)
+                    c_loader = DataLoader(C_dataset, batch_size=loader.batch_size, shuffle=False, num_workers=0)
+                    err, loss, _, _, _ = self.test_epoch(c_loader, model, num_samples=num_samples, return_details=True)
+                    to_log[f"C/{corr}/s{sev}/Error"] = float(err)
+                    to_log[f"C/{corr}/s{sev}/Acc"] = float(1.0 - err)
+                    to_log[f"C/{corr}/s{sev}/Loss"] = float(loss)
+                except Exception as e:
+                    print(f"[extra_evals] C {corr} failed: {e}", flush=True)
+
+        # ---- LT metrics (CIFAR10 / CIFAR100 / SVHN when imbalance) ----
+        if imbalance not in ("none", "") and dataset_name in ("cifar10", "cifar100", "svhn"):
+            try:
+                model.eval()
+                all_preds, all_labels = [], []
+                with torch.no_grad():
+                    for X, y in loader.test_loader:
+                        X, y = X.to(self.device), y.to(self.device)
+                        out = model(X)
+                        pred = out.argmax(dim=1)
+                        all_preds.append(pred.cpu().numpy())
+                        all_labels.append(y.cpu().numpy())
+                all_preds = np.concatenate(all_preds, axis=0)
+                all_labels = np.concatenate(all_labels, axis=0)
+                n_classes = int(getattr(loader, "num_classes", all_labels.max() + 1))
+                per_class_correct = np.zeros(n_classes)
+                per_class_total = np.zeros(n_classes)
+                for c in range(n_classes):
+                    mask = all_labels == c
+                    per_class_total[c] = mask.sum()
+                    if per_class_total[c] > 0:
+                        per_class_correct[c] = (all_preds[mask] == all_labels[mask]).sum()
+                per_class_acc = np.where(per_class_total > 0, per_class_correct / per_class_total, 0.0)
+                balanced_acc = float(np.mean(per_class_acc[per_class_total > 0])) if (per_class_total > 0).any() else 0.0
+                third = max(1, n_classes // 3)
+                many_acc = float(np.mean(per_class_acc[:third])) if third else 0.0
+                medium_acc = float(np.mean(per_class_acc[third:2*third])) if 2*third > third else 0.0
+                few_acc = float(np.mean(per_class_acc[2*third:])) if n_classes > 2*third else 0.0
+                to_log["LT/BalancedAcc"] = balanced_acc
+                to_log["LT/ManyAcc"] = many_acc
+                to_log["LT/MediumAcc"] = medium_acc
+                to_log["LT/FewAcc"] = few_acc
+                model.train()
+            except Exception as e:
+                print(f"[extra_evals] LT failed: {e}", flush=True)
+
+        if to_log:
+            to_log["epoch"] = int(global_epoch)
+            try:
+                if wandb.run is not None:
+                    wandb.log(to_log, step=int(global_epoch))
+                    print(f"[W&B] extra evals logged at epoch {global_epoch}: {list(to_log.keys())}", flush=True)
+            except Exception as e:
+                print("[W&B extra_evals log skipped]", e, flush=True)
 
     def MCdropout(self, model, X, y, num_samples=10, calibration=False):
     #def MCdropout(self, model, X, y, num_samples=10, adversarial=False, epsilon=0.1, num_iter=20, alpha=0.01, **kwargs):
@@ -4189,9 +4338,10 @@ class trainModel():
         iteration=-1,
         calibration=False,
         return_details=False,
+        attack_type="pgd_linf",
         **kwargs,
     ):
-        """Adversarial training/evaluation epoch over the dataset (PGD Linf)."""
+        """Adversarial evaluation over the dataset. attack_type: fgsm, pgd_linf, pgd_linf_rs."""
 
         total_loss, total_err, total_entropy, total_mutual_information, counter_inputs = 0.0, 0.0, 0.0, 0.0, 0.0
         write_scores = True if (models_name is not None and "binary" in models_name) else False
@@ -4205,18 +4355,19 @@ class trainModel():
             X, y = X.to(self.device), y.to(self.device)
             counter_inputs += len(y)
 
-            # ---- adversarial examples: pgd_linf ----
-            delta = self.pgd_linf(
-                model,
-                X,
-                y,
-                epsilon=epsilon,
-                num_iter=num_iter,
-                alpha=alpha,
-                num_samples=num_samples,
-                CrossEntropyFunction=True,
-                **kwargs,
-            )
+            # ---- adversarial examples: dispatch by attack_type ----
+            if attack_type == "fgsm":
+                delta = self.fgsm(model, X, y, epsilon=epsilon, num_samples=num_samples, **kwargs)
+            elif attack_type == "pgd_linf_rs":
+                delta = self.pgd_linf_rs(
+                    model, X, y, epsilon=epsilon, num_iter=num_iter, alpha=alpha,
+                    num_samples=num_samples, **kwargs
+                )
+            else:  # pgd_linf default
+                delta = self.pgd_linf(
+                    model, X, y, epsilon=epsilon, num_iter=num_iter, alpha=alpha,
+                    num_samples=num_samples, CrossEntropyFunction=True, **kwargs
+                )
             X_input = X + delta
 
             # forward on adversarial inputs
@@ -4839,7 +4990,11 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
          ecg_tau_target, ecg_tau_lr, ecg_tau_ema, ecg_tau_deadzone, ecg_tau_min, ecg_tau_max,
          device, devices_id, lr, momentum, batch, lr_adv, momentum_adv, batch_adv,
          half_prec=False, variants='none', log_runtime=True, rt_sample_every=20,
-         stage2_fast=False, stage2_find_every=3, stage2_ce_log_every=5):
+         stage2_fast=False, stage2_find_every=3, stage2_ce_log_every=5,
+         eval_extra_every=0, eval_adv_suite=False, adv_attacks='fgsm,pgd_linf,pgd_linf_rs',
+         adv_eps=8, adv_steps=20, adv_restarts=1, adv_pixel=True,
+         eval_c_suite=False, c_corruptions='gaussian_noise,brightness', c_severities=5,
+         imbalance='none', imb_factor=None):
     
     dataset_loader = dataset(dataset_name=dataset_name, batch_size = batch, batch_size_adv = batch_adv)
     model_cnn = model(dataset_loader, dataset_name, device, devices_id, lr, momentum, lr_adv, momentum_adv, batch_adv, half_prec=half_prec, variants=variants)
@@ -4891,6 +5046,20 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
     model_cnn.stage2_fast = bool(stage2_fast)
     model_cnn.stage2_find_every = int(stage2_find_every)
     model_cnn.stage2_ce_log_every = int(stage2_ce_log_every)
+
+    # RunA/RunB extra evals: ADV suite, C-suite, LT metrics (logged as ADV/, C/, LT/ in W&B)
+    model_cnn.eval_extra_every = int(eval_extra_every)
+    model_cnn.eval_adv_suite = bool(eval_adv_suite)
+    model_cnn.adv_attacks = str(adv_attacks)
+    model_cnn.adv_eps = float(adv_eps)
+    model_cnn.adv_steps = int(adv_steps)
+    model_cnn.adv_restarts = int(adv_restarts)
+    model_cnn.adv_pixel = bool(adv_pixel)
+    model_cnn.eval_c_suite = bool(eval_c_suite)
+    model_cnn.c_corruptions = str(c_corruptions)
+    model_cnn.c_severities = int(c_severities)
+    model_cnn.imbalance = str(imbalance)
+    model_cnn.imb_factor = float(imb_factor) if imb_factor is not None else None
 
     #trainTime, train_err, train_loss = model_cnn.run(modelName, iterations=int(stage1_epochs), stop=stop)
     model_cnn.run(runName, iterations=int(stage1_epochs), stop=stop, ckptName=ckptName, runName=runName)
@@ -5273,5 +5442,10 @@ if __name__ == "__main__":
         args.lr_adv, args.momentum_adv, args.batch_adv,
         args.half_prec, args.variants,
         args.log_runtime, args.rt_sample_every,
-        args.stage2_fast, args.stage2_find_every, args.stage2_ce_log_every
+        args.stage2_fast, args.stage2_find_every, args.stage2_ce_log_every,
+        getattr(args, "eval_extra_every", 0), getattr(args, "eval_adv_suite", False),
+        getattr(args, "adv_attacks", "fgsm,pgd_linf,pgd_linf_rs"), getattr(args, "adv_eps", 8),
+        getattr(args, "adv_steps", 20), getattr(args, "adv_restarts", 1), getattr(args, "adv_pixel", True),
+        getattr(args, "eval_c_suite", False), getattr(args, "c_corruptions", "gaussian_noise,brightness"),
+        getattr(args, "c_severities", 5), getattr(args, "imbalance", "none"), getattr(args, "imb_factor", None),
     )
