@@ -286,7 +286,18 @@ def main() -> None:
     os.environ["WANDB_TAGS"] = ",".join([t for t in tags if t])
     os.environ["PYTHONUNBUFFERED"] = "1"
 
-    # data root
+    
+    # per-row env overrides: any TSV column named env_<VARNAME> will set environment variable <VARNAME>
+    # Example columns: env_IMAGENET_ORIGINAL, env_IMAGENET_RES, env_IMAGENET_DS_ROOT, env_DL_WORKERS
+    for k, v in hp.items():
+        if not k.startswith("env_"):
+            continue
+        vv = str(v).strip()
+        if vv == "":
+            continue
+        os.environ[k[len("env_"):]] = vv
+
+# data root
     data_root = Path(os.environ.get("CEGS_DATA_DIR", str(run_dir / "data"))).expanduser().resolve()
     auto_download = os.environ.get("CEGS_AUTO_DOWNLOAD", "1") not in ("0", "false", "False")
     ensure_dataset(data_root, dataset, auto_download=auto_download)
@@ -339,6 +350,61 @@ def main() -> None:
     _add_arg(cmd, "--ecg_tau_lr", hp, "ecg_tau_lr")
     _add_arg(cmd, "--ecg_tau_ema", hp, "ecg_tau_ema")
     _add_arg(cmd, "--ecg_tau_deadzone", hp, "ecg_tau_deadzone")
+
+
+    # ---- suites (optional; only passed if present in TSV) ----
+    _add_arg(cmd, "--c_name", hp, "c_name")
+    _add_arg(cmd, "--c_severity", hp, "c_severity")
+
+    _add_arg(cmd, "--eval_c_suite", hp, "eval_c_suite")
+    _add_arg(cmd, "--c_corruptions", hp, "c_corruptions")
+    _add_arg(cmd, "--c_severities", hp, "c_severities")
+
+    _add_arg(cmd, "--imbalance", hp, "imbalance")
+    _add_arg(cmd, "--imb_factor", hp, "imb_factor")
+    _add_arg(cmd, "--imb_seed", hp, "imb_seed")
+
+    _add_arg(cmd, "--eval_adv_suite", hp, "eval_adv_suite")
+    _add_arg(cmd, "--adv_attacks", hp, "adv_attacks")
+    _add_arg(cmd, "--adv_eps", hp, "adv_eps")
+    _add_arg(cmd, "--adv_steps", hp, "adv_steps")
+    _add_arg(cmd, "--adv_restarts", hp, "adv_restarts")
+    _add_arg(cmd, "--adv_alpha", hp, "adv_alpha")
+    _add_arg(cmd, "--adv_pixel", hp, "adv_pixel")
+
+    _add_arg(cmd, "--eval_extra_every", hp, "eval_extra_every")
+
+    _add_arg(cmd, "--dump_gates", hp, "dump_gates")
+    _add_arg(cmd, "--dump_gates_n", hp, "dump_gates_n")
+
+
+    # ---- suites / long-tail / demo dump (optional) ----
+    _add_arg(cmd, "--eval_extra_every", hp, "eval_extra_every")
+
+    # ADV suite
+    _add_arg(cmd, "--eval_adv_suite", hp, "eval_adv_suite")
+    _add_arg(cmd, "--adv_attacks", hp, "adv_attacks")
+    _add_arg(cmd, "--adv_eps", hp, "adv_eps")
+    _add_arg(cmd, "--adv_steps", hp, "adv_steps")
+    _add_arg(cmd, "--adv_restarts", hp, "adv_restarts")
+    _add_arg(cmd, "--adv_alpha", hp, "adv_alpha")
+    _add_arg(cmd, "--adv_pixel", hp, "adv_pixel")
+
+    # C-suite
+    _add_arg(cmd, "--eval_c_suite", hp, "eval_c_suite")
+    _add_arg(cmd, "--c_corruptions", hp, "c_corruptions")
+    _add_arg(cmd, "--c_severities", hp, "c_severities")
+    _add_arg(cmd, "--c_name", hp, "c_name")
+    _add_arg(cmd, "--c_severity", hp, "c_severity")
+
+    # Long-tail
+    _add_arg(cmd, "--imbalance", hp, "imbalance")
+    _add_arg(cmd, "--imb_factor", hp, "imb_factor")
+    _add_arg(cmd, "--imb_seed", hp, "imb_seed")
+
+    # Demo dump
+    _add_arg(cmd, "--dump_gates", hp, "dump_gates")
+    _add_arg(cmd, "--dump_gates_n", hp, "dump_gates_n")
 
     # record
     (run_dir / "cmd.txt").write_text(" ".join(cmd) + "\n", encoding="utf-8")
