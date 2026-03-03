@@ -383,6 +383,11 @@ def main() -> None:
     _add_arg(cmd, "--dump_gates", hp, "dump_gates")
     _add_arg(cmd, "--dump_gates_n", hp, "dump_gates_n")
 
+    # stage2 speed (for large datasets e.g. ImageNet32: fewer full-train passes)
+    _add_arg(cmd, "--stage2_fast", hp, "stage2_fast")
+    _add_arg(cmd, "--stage2_find_every", hp, "stage2_find_every")
+    _add_arg(cmd, "--stage2_ce_log_every", hp, "stage2_ce_log_every")
+
     # record
     (run_dir / "cmd.txt").write_text(" ".join(cmd) + "\n", encoding="utf-8")
     (run_dir / "wandb_meta.txt").write_text(
