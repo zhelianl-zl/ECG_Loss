@@ -42,11 +42,11 @@ from ecg_loss import ecg_loss
 LOSS_ECG = "ecg"
 
 # --- PE mode switches ---
-PE_MODE = "raw"          # "raw" | "logk" | "logk_rms"
+PE_MODE = "raw"          # "raw" | "logk" | "logk_rms" | "none" (none/raw = no PE norm)
 PE_RMS_BETA = 0.99       # EMA beta
 PE_RMS_EPS = 1e-8
 
-Normalize_entropy = (PE_MODE != "raw")
+Normalize_entropy = (PE_MODE in ("logk", "logk_rms"))
 USE_PE_RMS = (PE_MODE == "logk_rms")
 
 imageNet_original = os.environ.get("IMAGENET_ORIGINAL", "0").lower() in ("1","true","yes","y")
@@ -4915,8 +4915,8 @@ if __name__ == '__main__':
         "--pe_mode",
         type=str,
         default="raw",
-        choices=["raw", "logk", "logk_rms"],
-        help="PE mode: raw (baseline), logk (PE/logK), logk_rms (PE/logK + RMS).",
+        choices=["raw", "logk", "logk_rms", "none"],
+        help="PE mode: raw/none (baseline), logk (PE/logK), logk_rms (PE/logK + RMS).",
     )
     parser.add_argument(
         "--seed",
@@ -5064,7 +5064,7 @@ def init_wandb_if_needed(args, default_name: str):
 
     # override PE mode from CLI
     PE_MODE = args.pe_mode
-    Normalize_entropy = (PE_MODE != "raw")
+    Normalize_entropy = (PE_MODE in ("logk", "logk_rms"))  # none/raw = no PE normalization
     USE_PE_RMS = (PE_MODE == "logk_rms")
 
     print(f"[CFG] pe_mode={PE_MODE} Normalize_entropy={Normalize_entropy} USE_PE_RMS={USE_PE_RMS} seed={args.seed}")
@@ -5137,7 +5137,7 @@ def init_wandb_if_needed(args, default_name: str):
 
     global PE_MODE, Normalize_entropy, USE_PE_RMS
     PE_MODE = args.pe_mode
-    Normalize_entropy = (PE_MODE != "raw")
+    Normalize_entropy = (PE_MODE in ("logk", "logk_rms"))  # none/raw = no PE normalization
     USE_PE_RMS = (PE_MODE == "logk_rms")
     print(f"[CFG] pe_mode={PE_MODE} Normalize_entropy={Normalize_entropy} USE_PE_RMS={USE_PE_RMS} seed={args.seed}")
 
