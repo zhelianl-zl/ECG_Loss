@@ -4987,6 +4987,26 @@ if __name__ == '__main__':
     parser.add_argument("--rt_sample_every", type=int, default=20,
                         help="Measure loss-call latency every N calls (CUDA uses events + 1 sync per epoch).")
 
+    # ---- eval / adv suite / C-suite / imbalance / dump (used by run_from_tsv sweeps) ----
+    parser.add_argument("--eval_extra_every", type=int, default=0, help="Run extra eval every N epochs (0 = off).")
+    parser.add_argument("--eval_adv_suite", type=str2bool, default=False, help="Run adversarial eval suite.")
+    parser.add_argument("--adv_attacks", type=str, default="fgsm,pgd_linf,pgd_linf_rs", help="Comma-separated list of adv attacks.")
+    parser.add_argument("--adv_eps", type=float, default=8, help="Epsilon for adv attacks (pixel scale).")
+    parser.add_argument("--adv_steps", type=int, default=20, help="Steps for iterative adv attacks.")
+    parser.add_argument("--adv_restarts", type=int, default=1, help="Restarts for adv attacks.")
+    parser.add_argument("--adv_alpha", type=float, default=None, help="Step size for adv (default derived from eps/steps).")
+    parser.add_argument("--adv_pixel", type=str2bool, default=True, help="Adv epsilon in pixel scale (vs 0-1).")
+    parser.add_argument("--eval_c_suite", type=str2bool, default=False, help="Run C (corruption) eval suite.")
+    parser.add_argument("--c_corruptions", type=str, default="gaussian_noise,brightness", help="Comma-separated C corruptions.")
+    parser.add_argument("--c_severities", type=int, default=5, help="Severity level for C suite.")
+    parser.add_argument("--c_name", type=str, default="", help="Single C corruption name (overrides c_corruptions if set).")
+    parser.add_argument("--c_severity", type=int, default=None, help="Single C severity (overrides c_severities if set).")
+    parser.add_argument("--imbalance", type=str, default="none", help="Class imbalance: none | longtail | ...")
+    parser.add_argument("--imb_factor", type=float, default=None, help="Imbalance factor for long-tail.")
+    parser.add_argument("--imb_seed", type=int, default=None, help="Seed for imbalance sampling.")
+    parser.add_argument("--dump_gates", type=str2bool, default=False, help="Dump gate stats for demo.")
+    parser.add_argument("--dump_gates_n", type=int, default=2000, help="Number of samples for dump_gates.")
+
     parser.add_argument("--force_run", action="store_true")
 
     args = parser.parse_args()
