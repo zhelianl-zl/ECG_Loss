@@ -85,9 +85,9 @@ def _parse_tsv_with_meta(conf_path: Path) -> Tuple[List[str], List[str], Dict[st
 
         # non-comment line
         if header_line is None:
-            header_line = s.strip()
+            header_line = s.rstrip('\n').rstrip('\r')
         else:
-            data_lines.append(s.strip())
+            data_lines.append(s.rstrip('\n').rstrip('\r'))
 
     if header_line is None:
         return [], [], meta
@@ -102,9 +102,12 @@ def read_tsv_row(conf_path: Path, idx: int) -> Tuple[Dict[str, str], Dict[str, s
     if idx < 0 or idx >= len(data_lines):
         raise RuntimeError(f"idx {idx} out of range for {conf_path} (rows={len(data_lines)})")
 
-    row = data_lines[idx].split("\t")
-    if len(row) != len(header):
-        raise RuntimeError(f"Row field count != header field count (idx={idx})")
+    row = data_lines[idx].split("	")
+    # tolerate missing trailing empty columns (common when editors trim tabs)
+    if len(row) < len(header):
+        row = row + [""] * (len(header) - len(row))
+    elif len(row) > len(header):
+        row = row[:len(header)]
     return dict(zip(header, row)), meta
 
 
@@ -350,32 +353,6 @@ def main() -> None:
     _add_arg(cmd, "--ecg_tau_lr", hp, "ecg_tau_lr")
     _add_arg(cmd, "--ecg_tau_ema", hp, "ecg_tau_ema")
     _add_arg(cmd, "--ecg_tau_deadzone", hp, "ecg_tau_deadzone")
-
-
-    # ---- suites (optional; only passed if present in TSV) ----
-    _add_arg(cmd, "--c_name", hp, "c_name")
-    _add_arg(cmd, "--c_severity", hp, "c_severity")
-
-    _add_arg(cmd, "--eval_c_suite", hp, "eval_c_suite")
-    _add_arg(cmd, "--c_corruptions", hp, "c_corruptions")
-    _add_arg(cmd, "--c_severities", hp, "c_severities")
-
-    _add_arg(cmd, "--imbalance", hp, "imbalance")
-    _add_arg(cmd, "--imb_factor", hp, "imb_factor")
-    _add_arg(cmd, "--imb_seed", hp, "imb_seed")
-
-    _add_arg(cmd, "--eval_adv_suite", hp, "eval_adv_suite")
-    _add_arg(cmd, "--adv_attacks", hp, "adv_attacks")
-    _add_arg(cmd, "--adv_eps", hp, "adv_eps")
-    _add_arg(cmd, "--adv_steps", hp, "adv_steps")
-    _add_arg(cmd, "--adv_restarts", hp, "adv_restarts")
-    _add_arg(cmd, "--adv_alpha", hp, "adv_alpha")
-    _add_arg(cmd, "--adv_pixel", hp, "adv_pixel")
-
-    _add_arg(cmd, "--eval_extra_every", hp, "eval_extra_every")
-
-    _add_arg(cmd, "--dump_gates", hp, "dump_gates")
-    _add_arg(cmd, "--dump_gates_n", hp, "dump_gates_n")
 
 
     # ---- suites / long-tail / demo dump (optional) ----

@@ -5177,6 +5177,86 @@ try:
 except Exception as _e:
     print("[WARN] Failed to bind suite helpers:", _e)
 
+
+    # -----------------------------
+    # Metric helpers (needed by test_epoch)
+    # -----------------------------
+    @staticmethod
+    def _pearson_corr(a: np.ndarray, b: np.ndarray) -> float:
+        a = np.asarray(a, dtype=np.float64)
+        b = np.asarray(b, dtype=np.float64)
+        if a.size == 0 or b.size == 0:
+            return float("nan")
+        a = a - a.mean()
+        b = b - b.mean()
+        denom = (np.sqrt((a * a).mean()) * np.sqrt((b * b).mean()) + 1e-12)
+        return float((a * b).mean() / denom)
+
+    @staticmethod
+    def _wasserstein_1d(x: np.ndarray, y: np.ndarray) -> float:
+        # 1D Wasserstein distance via quantile matching
+        x = np.asarray(x, dtype=np.float64)
+        y = np.asarray(y, dtype=np.float64)
+        if x.size == 0 or y.size == 0:
+            return float("nan")
+        x = np.sort(x)
+        y = np.sort(y)
+        n = min(len(x), len(y))
+        xi = x[np.linspace(0, len(x) - 1, n).astype(int)]
+        yi = y[np.linspace(0, len(y) - 1, n).astype(int)]
+        return float(np.mean(np.abs(xi - yi)))
+
+    @staticmethod
+    def _ece(conf: np.ndarray, correct: np.ndarray, n_bins: int = 15) -> float:
+        conf = np.asarray(conf, dtype=np.float64)
+        correct = np.asarray(correct, dtype=np.float64)
+        if conf.size == 0 or correct.size == 0:
+            return float("nan")
+        bins = np.linspace(0.0, 1.0, n_bins + 1)
+        ece = 0.0
+        for i in range(n_bins):
+            lo, hi = bins[i], bins[i + 1]
+            mask = (conf > lo) & (conf <= hi) if i > 0 else (conf >= lo) & (conf <= hi)
+            if mask.sum() == 0:
+                continue
+            acc_bin = correct[mask].mean()
+            conf_bin = conf[mask].mean()
+            ece += (mask.mean()) * abs(acc_bin - conf_bin)
+        return float(ece)
+
+    @staticmethod
+    def _auroc(y_true: np.ndarray, y_score: np.ndarray) -> float:
+        # AUROC for binary labels (y_true in {0,1}). Returns NaN if only one class present.
+        y_true = np.asarray(y_true, dtype=np.int32)
+        y_score = np.asarray(y_score, dtype=np.float64)
+        if y_true.size == 0:
+            return float("nan")
+        pos = (y_true == 1)
+        neg = (y_true == 0)
+        n_pos = int(pos.sum())
+        n_neg = int(neg.sum())
+        if n_pos == 0 or n_neg == 0:
+            return float("nan")
+        order = np.argsort(y_score, kind="mergesort")
+        s_sorted = y_score[order]
+        y_sorted = y_true[order]
+        # average ranks for ties
+        ranks = np.empty_like(s_sorted, dtype=np.float64)
+        n = len(s_sorted)
+        i = 0
+        r = 1
+        while i < n:
+            j = i + 1
+            while j < n and s_sorted[j] == s_sorted[i]:
+                j += 1
+            avg_rank = 0.5 * (r + (r + (j - i) - 1))
+            ranks[i:j] = avg_rank
+            r += (j - i)
+            i = j
+        rank_sum_pos = ranks[y_sorted == 1].sum()
+        auc = (rank_sum_pos - n_pos * (n_pos + 1) / 2.0) / (n_pos * n_neg)
+        return float(auc)
+
 class model(trainModel):
     def __init__(self, dataset, dataset_name, device, devices_id, lr=0.1, momentum=0, lr_adv=0.1, momentum_adv=0, batch_adv=100, half_prec=False, variants=None):
         self.ecg_lam = 1.0
