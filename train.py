@@ -1037,9 +1037,12 @@ class dataset():
                 if not imagenet_root:
                     data_dir_env = os.environ.get("DATA_DIR", "").strip()
                     if data_dir_env:
-                        cand = os.path.join(data_dir_env, "imageNet")
-                        if os.path.isdir(os.path.join(cand, "train")) and os.path.isdir(os.path.join(cand, "val")):
-                            imagenet_root = cand
+                        # prefer a non-colliding folder name for original ImageNet
+                        for sub in ("imagenet1k", "imageNet"):
+                            cand = os.path.join(data_dir_env, sub)
+                            if os.path.isdir(os.path.join(cand, "train")) and os.path.isdir(os.path.join(cand, "val")):
+                                imagenet_root = cand
+                                break
                 if not imagenet_root:
                     imagenet_root = "../data/imageNet"
 
@@ -1051,7 +1054,10 @@ class dataset():
                         f"Got traindir={traindir}, valdir={valdir}"
                     )
                 print(f"[DATA] ImageNet root: {imagenet_root}")
-                crop_size = 224
+                crop_size = int(os.environ.get("IMAGENET_CROP", "224"))
+
+                # keep the usual ImageNet eval ratio (256 -> 224), but scaled with crop_size
+                resize_size = int(os.environ.get("IMAGENET_RESIZE", str(int(round(crop_size * 256 / 224)))))
 
                 normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
                 # --- ImageFolder scan can be slow on shared FS; time it for debugging ---
@@ -1067,26 +1073,68 @@ class dataset():
                 _t_scan_val = time.time()
                 print(f"[DATA] Building ImageFolder val from: {valdir}", flush=True)
                 self.data_test = datasets.ImageFolder(valdir, transforms.Compose([
-                        transforms.Resize(256),
+                        transforms.Resize(resize_size),
                         transforms.CenterCrop(crop_size),
                         transforms.ToTensor(),normalize,
                     ]))
                 print(f"[DATA] Val ImageFolder ready: {len(self.data_test)} samples, took {time.time()-_t_scan_val:.1f}s", flush=True)
 
             else:
-                print("Downsampled dataset")
-                root_dir = '../data/imageNet/'
+                print("Downsampled dataset (SmallImageNet / ImageNet<res>x<res>)")
 
-                resolution=64 
-                classes=1000
-                
-                normalize = transforms.Normalize(mean=[0.4810,0.4574,0.4078], std=[0.2146,0.2104,0.2138])
+                # Resolution & root folder are fully configurable via env vars:
+                #   IMAGENET_RES=32|64 (default: 64)
+                #   IMAGENET_DS_ROOT=/path/to/SmallImageNet_<res>x<res>
+                resolution = int(os.environ.get("IMAGENET_RES", "64"))
+                classes = int(os.environ.get("IMAGENET_CLASSES", "1000"))
 
-                tf_train = transforms.Compose([transforms.RandomHorizontalFlip(),transforms.ToTensor(),normalize,])
-                tf_test = transforms.Compose([transforms.ToTensor(),normalize,])
+                ds_root = os.environ.get("IMAGENET_DS_ROOT", "").strip()
+                if not ds_root:
+                    data_dir_env = os.environ.get("DATA_DIR", "").strip()
+                    if data_dir_env:
+                        cand = os.path.join(data_dir_env, f"SmallImageNet_{resolution}x{resolution}")
+                        if os.path.isdir(cand):
+                            ds_root = cand
+                    if not ds_root:
+                        ds_root = os.path.join("../data", f"SmallImageNet_{resolution}x{resolution}")
 
-                self.data_train = SmallImagenet(root=root_dir, size=resolution, train=True, transform=tf_train, classes=range(classes), shuffle=True) 
-                self.data_test = SmallImagenet(root=root_dir, size=resolution, train=False, transform=tf_test, classes=range(classes)) 
+                if (not os.path.isdir(ds_root)):
+                    raise FileNotFoundError(
+                        f"SmallImageNet not found at {ds_root}. "
+                        f"Expected files like train_data_batch_1 ... train_data_batch_10 and val_data. "
+                        f"Set IMAGENET_DS_ROOT to the extracted folder."
+                    )
+
+                print(f"[DATA] SmallImageNet root: {ds_root}  (resolution={resolution}, classes={classes})", flush=True)
+
+                # Normalization:
+                #   - default: standard ImageNet mean/std (stable across res and matches torchvision baselines)
+                #   - set IMAGENET_NORM=ds to use the common SmallImageNet stats (close enough for 32/64)
+                norm_mode = os.environ.get("IMAGENET_NORM", "imagenet").lower()
+                if norm_mode in ("ds", "smallimagenet", "small"):
+                    mean = [0.4810, 0.4574, 0.4078]
+                    std  = [0.2146, 0.2104, 0.2138]
+                else:
+                    mean = [0.485, 0.456, 0.406]
+                    std  = [0.229, 0.224, 0.225]
+                normalize = transforms.Normalize(mean=mean, std=std)
+
+                # Augmentations: keep it light so we can quickly compare CE vs CEGS.
+                # (Avoid dataset.shuffle=True because it copies the entire array in RAM.)
+                pad = 4 if resolution >= 32 else 2
+                tf_train = transforms.Compose([
+                    transforms.RandomCrop(resolution, padding=pad),
+                    transforms.RandomHorizontalFlip(),
+                    transforms.ToTensor(),
+                    normalize,
+                ])
+                tf_test = transforms.Compose([
+                    transforms.ToTensor(),
+                    normalize,
+                ])
+
+                self.data_train = SmallImagenet(root=ds_root, size=resolution, train=True,  transform=tf_train, classes=range(classes), shuffle=False)
+                self.data_test  = SmallImagenet(root=ds_root, size=resolution, train=False, transform=tf_test,  classes=range(classes), shuffle=False)
 
             self.data_val = self.data_test
 
@@ -4716,14 +4764,19 @@ class model(trainModel):
 
         if self.dataset_name == "imageNet":
             num_classes = 1000
-            depth = 50
-            dropout_rate = 0.3
+            # Decide whether we are training on original ILSVRC2012 (224) or downsampled SmallImageNet (<=64)
+            is_original = os.environ.get("IMAGENET_ORIGINAL", "0").lower() in ("1","true","yes","y")
+
+            # Defaults:
+            #   - original 224x224: ResNet-50 (strong baseline)
+            #   - downsampled (32/64): ResNet-18 (fast sanity check)
+            depth = int(os.environ.get("IMAGENET_DEPTH", "50" if is_original else "18"))
+            dropout_rate = float(os.environ.get("IMAGENET_DROPOUT", "0.3" if is_original else "0.0"))
 
             # IMPORTANT (ImageNet memory fix):
-            # Use the standard torchvision ResNet stem (stride-2 conv + maxpool) by default.
-            # Our custom ResNet implementation is CIFAR-style (no early downsampling),
-            # which can explode activation memory on 224x224 inputs and OOM even on H100.
-            use_torchvision = os.environ.get("IMAGENET_TORCHVISION", "1").lower() in ("1","true","yes","y")
+            # Use torchvision ResNet (standard ImageNet stem) by default on 224x224.
+            default_tv = "1" if is_original else "0"
+            use_torchvision = os.environ.get("IMAGENET_TORCHVISION", default_tv).lower() in ("1","true","yes","y")
 
             if use_torchvision:
                 # Use torchvision ResNet with the standard ImageNet stem (stride-2 conv + maxpool)

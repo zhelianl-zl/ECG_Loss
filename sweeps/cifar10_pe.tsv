@@ -1,0 +1,10 @@
+#wandb_project=ecg-cifar10
+dataset	seed	stop	stop_val	lr	momentum	batch	workers	half_prec	variants	type	stage1_epochs	stage2_epochs	loss_stage1	loss_stage2	ecg_conf_type	ecg_detach_gates	ecg_schedule	ecg_lam	ecg_tau	ecg_k	ecg_lam_start	ecg_lam_end	ecg_tau_start	ecg_tau_end	ecg_k_start	ecg_k_end	ecg_tau_target	ecg_tau_lr	ecg_tau_ema	ecg_tau_deadzone	method_name	run_kind
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	1-pe	True	linear	0.38	0.65	8	0.38	0.055	0.65	0.65	8	8					1pe_lin_lam0.38to0.055_tau0.65_k8	r2
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	1-pe	True	linear	0.38	0.70	8	0.38	0.055	0.70	0.70	8	8					1pe_lin_lam0.38to0.055_tau0.70_k8	r2
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	1-pe	True	linear	0.38	0.70	10	0.38	0.055	0.70	0.70	10	10					1pe_lin_lam0.38to0.055_tau0.70_k10	r2
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	1-pe	True	linear	0.38	0.75	10	0.38	0.055	0.75	0.75	10	10					1pe_lin_lam0.38to0.055_tau0.75_k10	r2
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	1-pe	True	linear	0.42	0.65	8	0.42	0.055	0.65	0.65	8	8					1pe_lin_lam0.42to0.055_tau0.65_k8	r2
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	1-pe	True	linear	0.42	0.70	8	0.42	0.055	0.70	0.70	8	8					1pe_lin_lam0.42to0.055_tau0.70_k8	r2
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	1-pe	True	linear	0.40	0.70	10	0.40	0.075	0.70	0.70	10	10					1pe_lin_lam0.40to0.075_tau0.70_k10	r2
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	1-pe	True	linear	0.40	0.70	12	0.40	0.040	0.70	0.70	12	12					1pe_lin_lam0.40to0.040_tau0.70_k12	r2
