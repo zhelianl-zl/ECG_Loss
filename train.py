@@ -640,39 +640,74 @@ class BinaryCIFAR10(Dataset):
         return len(self.data)
 
 
-class CIFAR10C(VisionDataset):
-    def __init__(self, root :str, name :str, transform=None, target_transform=None):
-        
-        corruptions = ['natural','gaussian_noise','shot_noise','speckle_noise','impulse_noise','defocus_blur','gaussian_blur','motion_blur','zoom_blur',\
-                   'snow','fog','brightness','contrast','elastic_transform','pixelate','jpeg_compression','spatter','saturate','frost']
+class CIFARNC(VisionDataset):
+    """
+    CIFAR-* -C (Common Corruptions) stored as .npy.
 
-        assert name in corruptions
+    Each corruption file <name>.npy has 50k images ordered by severity blocks.
+    Severity s in {1..5}: indices [(s-1)*10000 : s*10000].
 
-        dir  = root + '/CIFAR-10-C' 
+    Expected folder layout:
+      <root>/CIFAR-10-C/<corruption>.npy + labels.npy
+      <root>/CIFAR-100-C/<corruption>.npy + labels.npy
+    """
 
-        super(CIFAR10C, self).__init__(
-            dir, transform=transform,
-            target_transform=target_transform
-        )
-        data_path = os.path.join(dir, name + '.npy')
-        target_path = os.path.join(dir, 'labels.npy')
-        
+    CORRUPTIONS = [
+        "gaussian_noise", "shot_noise", "impulse_noise", "speckle_noise",
+        "defocus_blur", "gaussian_blur", "glass_blur", "motion_blur", "zoom_blur",
+        "snow", "frost", "fog", "brightness", "contrast", "elastic_transform",
+        "pixelate", "jpeg_compression", "spatter", "saturate",
+    ]
+
+    def __init__(self, root: str, n_classes: int, name: str, severity: int = 5,
+                 transform=None, target_transform=None):
+        assert n_classes in (10, 100)
+        name = str(name).strip()
+        if name not in self.CORRUPTIONS:
+            raise ValueError(f"Unknown corruption '{name}'. Valid: {self.CORRUPTIONS}")
+        severity = int(severity)
+        if severity < 1 or severity > 5:
+            raise ValueError("severity must be in {1..5}")
+
+        dir_ = os.path.join(root, f"CIFAR-{n_classes}-C")
+        super().__init__(dir_, transform=transform, target_transform=target_transform)
+
+        data_path = os.path.join(dir_, name + ".npy")
+        target_path = os.path.join(dir_, "labels.npy")
+
         self.data = np.load(data_path)
         self.targets = np.load(target_path)
-        
+
+        start = (severity - 1) * 10000
+        end = severity * 10000
+        self.data = self.data[start:end]
+        self.targets = self.targets[start:end]
+
     def __getitem__(self, index):
-        img, targets = self.data[index], self.targets[index]
+        img, targets = self.data[index], int(self.targets[index])
         img = Image.fromarray(img)
-        
+
         if self.transform is not None:
             img = self.transform(img)
         if self.target_transform is not None:
             targets = self.target_transform(targets)
-            
+
         return img, targets
-    
+
     def __len__(self):
         return len(self.data)
+
+
+class CIFAR10C(CIFARNC):
+    def __init__(self, root: str, name: str, severity: int = 5, transform=None, target_transform=None):
+        super().__init__(root=root, n_classes=10, name=name, severity=severity,
+                         transform=transform, target_transform=target_transform)
+
+
+class CIFAR100C(CIFARNC):
+    def __init__(self, root: str, name: str, severity: int = 5, transform=None, target_transform=None):
+        super().__init__(root=root, n_classes=100, name=name, severity=severity,
+                         transform=transform, target_transform=target_transform)
 
 
 class DEUP():
@@ -871,12 +906,142 @@ class DEUP():
         return delta.detach()
 
 
+# ----------------------------
+# Long-tail / Imbalanced utils
+# ----------------------------
+def _dataset_targets_as_list(ds):
+    """Return targets/labels as a Python list[int]."""
+    if hasattr(ds, "targets"):
+        t = ds.targets
+    elif hasattr(ds, "labels"):
+        t = ds.labels
+    else:
+        raise AttributeError("Dataset has no .targets or .labels")
+    if isinstance(t, torch.Tensor):
+        t = t.detach().cpu().numpy()
+    if isinstance(t, np.ndarray):
+        return [int(x) for x in t.tolist()]
+    return [int(x) for x in list(t)]
+
+
+def _normalize_imb_factor(imb_factor: float) -> float:
+    """
+    Accept either:
+      - factor > 1 (e.g., 100 means min = max/100), or
+      - factor in (0,1] (e.g., 0.01 means min = max*0.01).
+    Returns r in (0,1], where min = max*r.
+    """
+    f = float(imb_factor)
+    if f <= 0:
+        return 1.0
+    return (1.0 / f) if f > 1.0 else f
+
+
+def _img_num_per_cls_from_counts(counts, imb_type: str, imb_factor: float):
+    """Compute desired images per class for exp/step imbalance."""
+    imb_type = (imb_type or "none").lower()
+    if imb_type == "none":
+        return list(counts)
+
+    r = _normalize_imb_factor(imb_factor)
+    max_n = int(max(counts))
+
+    if imb_type == "exp":
+        # exp decay from head->tail
+        num_classes = len(counts)
+        img_num = []
+        for cls_idx in range(num_classes):
+            if num_classes <= 1:
+                img_num.append(max_n)
+            else:
+                n = int(round(max_n * (r ** (cls_idx / (num_classes - 1)))))
+                img_num.append(max(1, n))
+        return img_num
+
+    if imb_type == "step":
+        num_classes = len(counts)
+        img_num = []
+        half = num_classes // 2
+        for cls_idx in range(num_classes):
+            n = max_n if cls_idx < half else int(round(max_n * r))
+            img_num.append(max(1, n))
+        return img_num
+
+    raise ValueError(f"Unknown imbalance type: {imb_type}")
+
+
+def make_longtail_subset(ds, num_classes: int, imb_type: str, imb_factor: float, seed: int = 0):
+    """
+    Return (subset_ds, class_counts_after, group_of_class)
+
+    group_of_class[c] in {'many','medium','few'} based on post-subsample class counts:
+      - top 1/3 counts -> many
+      - middle 1/3 -> medium
+      - bottom 1/3 -> few
+    """
+    targets = _dataset_targets_as_list(ds)
+    counts = [0] * int(num_classes)
+    for y in targets:
+        if 0 <= int(y) < num_classes:
+            counts[int(y)] += 1
+
+    desired = _img_num_per_cls_from_counts(counts, imb_type, imb_factor)
+
+    rng = random.Random(int(seed))
+    cls_to_indices = [[] for _ in range(num_classes)]
+    for i, y in enumerate(targets):
+        y = int(y)
+        if 0 <= y < num_classes:
+            cls_to_indices[y].append(i)
+
+    chosen = []
+    for c in range(num_classes):
+        idxs = cls_to_indices[c]
+        rng.shuffle(idxs)
+        k = min(len(idxs), int(desired[c]))
+        chosen.extend(idxs[:k])
+
+    rng.shuffle(chosen)
+    subset = Subset(ds, chosen)
+
+    # recompute counts after
+    counts2 = [0] * num_classes
+    for i in chosen:
+        y = int(targets[i])
+        if 0 <= y < num_classes:
+            counts2[y] += 1
+
+    # groups
+    order = sorted(range(num_classes), key=lambda c: counts2[c], reverse=True)
+    n = num_classes
+    one_third = max(1, n // 3)
+    many_set = set(order[:one_third])
+    few_set = set(order[-one_third:])
+    group = []
+    for c in range(num_classes):
+        if c in many_set:
+            group.append("many")
+        elif c in few_set:
+            group.append("few")
+        else:
+            group.append("medium")
+
+    return subset, counts2, group
+
 class dataset():
-    def __init__(self, dataset_name="mnist", batch_size = 100,  batch_size_adv = 100):
+    def __init__(self, dataset_name="mnist", batch_size = 100,  batch_size_adv = 100, c_name="gaussian_noise", c_severity=5, imbalance="none", imb_factor=1.0, imb_seed=0):
         batch_size_test = 32
         # the shuffle needs to be false for the DataLoader to more easily store the IDs of wrong classified inputs 
         self.batch_size = batch_size
         self.batch_size_adv = batch_size_adv
+        # defaults for suite evaluation
+        self.data_root = "../data"
+        self.norm_mean = (0.0, 0.0, 0.0)
+        self.norm_std = (1.0, 1.0, 1.0)
+        self.lt_enabled = False
+        self.lt_train_counts = None
+        self.lt_group_per_class = None
+
         
         if dataset_name == "mnist":
             self.num_classes = 10
@@ -940,6 +1105,24 @@ class dataset():
             self.data_test = datasets.CIFAR10("../data", train=False, download=True, transform=test_transform)
             self.data_val = self.data_test
 
+            # normalization stats (for pixel-space attacks / C-suite transforms)
+            self.norm_mean = cifar10_mean
+            self.norm_std = cifar10_std
+            self.data_root = "../data"
+
+            # optional long-tail (train-time imbalance)
+            self.lt_enabled = False
+            if str(imbalance).lower() != "none":
+                try:
+                    self.data_train, self.lt_train_counts, self.lt_group_per_class = make_longtail_subset(
+                        self.data_train, num_classes=self.num_classes,
+                        imb_type=imbalance, imb_factor=imb_factor, seed=imb_seed
+                    )
+                    self.lt_enabled = True
+                    print(f"[LT] {dataset_name}: imbalance={imbalance} factor={imb_factor} -> train={len(self.data_train)}", flush=True)
+                except Exception as e:
+                    print(f"[LT] failed to apply imbalance ({imbalance},{imb_factor}): {e}", flush=True)
+
             self.train_loader = DataLoader(self.data_train,    batch_size = batch_size, shuffle=False) if batch_size > 0 else None
             self.trainAvd_loader = DataLoader(self.data_train,    batch_size = batch_size_adv, shuffle=False) if batch_size_adv > 0 else None
             self.test_loader = DataLoader(self.data_test, batch_size = batch_size_test, shuffle=False)
@@ -965,8 +1148,26 @@ class dataset():
 
             self.data_train = datasets.CIFAR10("../data", train=True, download=True, transform=train_transform)
             self.data_val = datasets.CIFAR10("../data", train=False, download=True, transform=test_transform)
-            self.data_test = CIFAR10C("../data", name='gaussian_noise', transform=test_transform)
-            
+            self.data_test = CIFAR10C("../data", name=c_name, severity=int(c_severity), transform=test_transform)
+
+            # normalization stats
+            self.norm_mean = cifar10_mean
+            self.norm_std = cifar10_std
+            self.data_root = "../data"
+
+            # optional long-tail (train-time imbalance)
+            self.lt_enabled = False
+            if str(imbalance).lower() != "none":
+                try:
+                    self.data_train, self.lt_train_counts, self.lt_group_per_class = make_longtail_subset(
+                        self.data_train, num_classes=self.num_classes,
+                        imb_type=imbalance, imb_factor=imb_factor, seed=imb_seed
+                    )
+                    self.lt_enabled = True
+                    print(f"[LT] {dataset_name}: imbalance={imbalance} factor={imb_factor} -> train={len(self.data_train)}", flush=True)
+                except Exception as e:
+                    print(f"[LT] failed to apply imbalance ({imbalance},{imb_factor}): {e}", flush=True)
+
             self.train_loader = DataLoader(self.data_train,    batch_size = batch_size, shuffle=False) if batch_size > 0 else None
             self.trainAvd_loader = DataLoader(self.data_train,    batch_size = batch_size_adv, shuffle=False) if batch_size_adv > 0 else None
             self.test_loader = DataLoader(self.data_test, batch_size = batch_size_test, shuffle=False)
@@ -1022,11 +1223,70 @@ class dataset():
             self.data_test = datasets.CIFAR100("../data", train=False, download=True, transform=test_transform)
             self.data_val = self.data_test
 
+            # normalization stats
+            self.norm_mean = cifar100_mean
+            self.norm_std = cifar100_std
+            self.data_root = "../data"
+
+            # optional long-tail (train-time imbalance)
+            self.lt_enabled = False
+            if str(imbalance).lower() != "none":
+                try:
+                    self.data_train, self.lt_train_counts, self.lt_group_per_class = make_longtail_subset(
+                        self.data_train, num_classes=self.num_classes,
+                        imb_type=imbalance, imb_factor=imb_factor, seed=imb_seed
+                    )
+                    self.lt_enabled = True
+                    print(f"[LT] {dataset_name}: imbalance={imbalance} factor={imb_factor} -> train={len(self.data_train)}", flush=True)
+                except Exception as e:
+                    print(f"[LT] failed to apply imbalance ({imbalance},{imb_factor}): {e}", flush=True)
+
             self.train_loader = DataLoader(self.data_train,    batch_size = batch_size, shuffle=False) if batch_size > 0 else None
             self.trainAvd_loader = DataLoader(self.data_train,    batch_size = batch_size_adv, shuffle=False) if batch_size_adv > 0 else None
             self.test_loader = DataLoader(self.data_test, batch_size = batch_size_test, shuffle=False)
             #self.val_loader = self.test_loader
 
+
+        elif dataset_name ==  "cifar100-c":
+            self.num_classes = 100
+            cifar100_mean = (0.5071, 0.4867, 0.4408)
+            cifar100_std = (0.2675, 0.2565, 0.2761)
+
+            train_transform = transforms.Compose([
+                        transforms.RandomCrop(32, padding=4),
+                        transforms.RandomHorizontalFlip(),
+                        transforms.ToTensor(),
+                        transforms.Normalize(cifar100_mean, cifar100_std), ])
+
+            test_transform = transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Normalize(cifar100_mean, cifar100_std),])
+
+            self.data_train = datasets.CIFAR100("../data", train=True, download=True, transform=train_transform)
+            self.data_val = datasets.CIFAR100("../data", train=False, download=True, transform=test_transform)
+            self.data_test = CIFAR100C("../data", name=c_name, severity=int(c_severity), transform=test_transform)
+
+            # normalization stats
+            self.norm_mean = cifar100_mean
+            self.norm_std = cifar100_std
+            self.data_root = "../data"
+
+            # optional long-tail (train-time imbalance)
+            self.lt_enabled = False
+            if str(imbalance).lower() != "none":
+                try:
+                    self.data_train, self.lt_train_counts, self.lt_group_per_class = make_longtail_subset(
+                        self.data_train, num_classes=self.num_classes,
+                        imb_type=imbalance, imb_factor=imb_factor, seed=imb_seed
+                    )
+                    self.lt_enabled = True
+                    print(f"[LT] {dataset_name}: imbalance={imbalance} factor={imb_factor} -> train={len(self.data_train)}", flush=True)
+                except Exception as e:
+                    print(f"[LT] failed to apply imbalance ({imbalance},{imb_factor}): {e}", flush=True)
+
+            self.train_loader = DataLoader(self.data_train,    batch_size = batch_size, shuffle=False) if batch_size > 0 else None
+            self.trainAvd_loader = DataLoader(self.data_train,    batch_size = batch_size_adv, shuffle=False) if batch_size_adv > 0 else None
+            self.test_loader = DataLoader(self.data_test, batch_size = batch_size_test, shuffle=False)
 
         elif dataset_name ==  "imageNet":
             self.num_classes = 1000
@@ -1037,12 +1297,9 @@ class dataset():
                 if not imagenet_root:
                     data_dir_env = os.environ.get("DATA_DIR", "").strip()
                     if data_dir_env:
-                        # prefer a non-colliding folder name for original ImageNet
-                        for sub in ("imagenet1k", "imageNet"):
-                            cand = os.path.join(data_dir_env, sub)
-                            if os.path.isdir(os.path.join(cand, "train")) and os.path.isdir(os.path.join(cand, "val")):
-                                imagenet_root = cand
-                                break
+                        cand = os.path.join(data_dir_env, "imageNet")
+                        if os.path.isdir(os.path.join(cand, "train")) and os.path.isdir(os.path.join(cand, "val")):
+                            imagenet_root = cand
                 if not imagenet_root:
                     imagenet_root = "../data/imageNet"
 
@@ -1054,10 +1311,7 @@ class dataset():
                         f"Got traindir={traindir}, valdir={valdir}"
                     )
                 print(f"[DATA] ImageNet root: {imagenet_root}")
-                crop_size = int(os.environ.get("IMAGENET_CROP", "224"))
-
-                # keep the usual ImageNet eval ratio (256 -> 224), but scaled with crop_size
-                resize_size = int(os.environ.get("IMAGENET_RESIZE", str(int(round(crop_size * 256 / 224)))))
+                crop_size = 224
 
                 normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
                 # --- ImageFolder scan can be slow on shared FS; time it for debugging ---
@@ -1073,68 +1327,26 @@ class dataset():
                 _t_scan_val = time.time()
                 print(f"[DATA] Building ImageFolder val from: {valdir}", flush=True)
                 self.data_test = datasets.ImageFolder(valdir, transforms.Compose([
-                        transforms.Resize(resize_size),
+                        transforms.Resize(256),
                         transforms.CenterCrop(crop_size),
                         transforms.ToTensor(),normalize,
                     ]))
                 print(f"[DATA] Val ImageFolder ready: {len(self.data_test)} samples, took {time.time()-_t_scan_val:.1f}s", flush=True)
 
             else:
-                print("Downsampled dataset (SmallImageNet / ImageNet<res>x<res>)")
+                print("Downsampled dataset")
+                root_dir = '../data/imageNet/'
 
-                # Resolution & root folder are fully configurable via env vars:
-                #   IMAGENET_RES=32|64 (default: 64)
-                #   IMAGENET_DS_ROOT=/path/to/SmallImageNet_<res>x<res>
-                resolution = int(os.environ.get("IMAGENET_RES", "64"))
-                classes = int(os.environ.get("IMAGENET_CLASSES", "1000"))
+                resolution=64 
+                classes=1000
+                
+                normalize = transforms.Normalize(mean=[0.4810,0.4574,0.4078], std=[0.2146,0.2104,0.2138])
 
-                ds_root = os.environ.get("IMAGENET_DS_ROOT", "").strip()
-                if not ds_root:
-                    data_dir_env = os.environ.get("DATA_DIR", "").strip()
-                    if data_dir_env:
-                        cand = os.path.join(data_dir_env, f"SmallImageNet_{resolution}x{resolution}")
-                        if os.path.isdir(cand):
-                            ds_root = cand
-                    if not ds_root:
-                        ds_root = os.path.join("../data", f"SmallImageNet_{resolution}x{resolution}")
+                tf_train = transforms.Compose([transforms.RandomHorizontalFlip(),transforms.ToTensor(),normalize,])
+                tf_test = transforms.Compose([transforms.ToTensor(),normalize,])
 
-                if (not os.path.isdir(ds_root)):
-                    raise FileNotFoundError(
-                        f"SmallImageNet not found at {ds_root}. "
-                        f"Expected files like train_data_batch_1 ... train_data_batch_10 and val_data. "
-                        f"Set IMAGENET_DS_ROOT to the extracted folder."
-                    )
-
-                print(f"[DATA] SmallImageNet root: {ds_root}  (resolution={resolution}, classes={classes})", flush=True)
-
-                # Normalization:
-                #   - default: standard ImageNet mean/std (stable across res and matches torchvision baselines)
-                #   - set IMAGENET_NORM=ds to use the common SmallImageNet stats (close enough for 32/64)
-                norm_mode = os.environ.get("IMAGENET_NORM", "imagenet").lower()
-                if norm_mode in ("ds", "smallimagenet", "small"):
-                    mean = [0.4810, 0.4574, 0.4078]
-                    std  = [0.2146, 0.2104, 0.2138]
-                else:
-                    mean = [0.485, 0.456, 0.406]
-                    std  = [0.229, 0.224, 0.225]
-                normalize = transforms.Normalize(mean=mean, std=std)
-
-                # Augmentations: keep it light so we can quickly compare CE vs CEGS.
-                # (Avoid dataset.shuffle=True because it copies the entire array in RAM.)
-                pad = 4 if resolution >= 32 else 2
-                tf_train = transforms.Compose([
-                    transforms.RandomCrop(resolution, padding=pad),
-                    transforms.RandomHorizontalFlip(),
-                    transforms.ToTensor(),
-                    normalize,
-                ])
-                tf_test = transforms.Compose([
-                    transforms.ToTensor(),
-                    normalize,
-                ])
-
-                self.data_train = SmallImagenet(root=ds_root, size=resolution, train=True,  transform=tf_train, classes=range(classes), shuffle=False)
-                self.data_test  = SmallImagenet(root=ds_root, size=resolution, train=False, transform=tf_test,  classes=range(classes), shuffle=False)
+                self.data_train = SmallImagenet(root=root_dir, size=resolution, train=True, transform=tf_train, classes=range(classes), shuffle=True) 
+                self.data_test = SmallImagenet(root=root_dir, size=resolution, train=False, transform=tf_test, classes=range(classes)) 
 
             self.data_val = self.data_test
 
@@ -1162,7 +1374,25 @@ class dataset():
             self.data_train = datasets.SVHN("../data", split='train', download=True, transform=transforms.ToTensor())
             self.data_test = datasets.SVHN("../data", split='test', download=True, transform=transforms.ToTensor())
             self.data_val = self.data_test
-            
+
+            # normalization stats (SVHN uses raw [0,1] tensor)
+            self.norm_mean = (0.0, 0.0, 0.0)
+            self.norm_std = (1.0, 1.0, 1.0)
+            self.data_root = "../data"
+
+            # optional long-tail (train-time imbalance)
+            self.lt_enabled = False
+            if str(imbalance).lower() != "none":
+                try:
+                    self.data_train, self.lt_train_counts, self.lt_group_per_class = make_longtail_subset(
+                        self.data_train, num_classes=self.num_classes,
+                        imb_type=imbalance, imb_factor=imb_factor, seed=imb_seed
+                    )
+                    self.lt_enabled = True
+                    print(f"[LT] {dataset_name}: imbalance={imbalance} factor={imb_factor} -> train={len(self.data_train)}", flush=True)
+                except Exception as e:
+                    print(f"[LT] failed to apply imbalance ({imbalance},{imb_factor}): {e}", flush=True)
+
             self.train_loader = DataLoader(self.data_train, batch_size = batch_size, shuffle=False, pin_memory=True,) if batch_size > 0 else None
             self.trainAvd_loader = DataLoader(self.data_train, batch_size = batch_size_adv, shuffle=False, pin_memory=True,) if batch_size_adv > 0 else None
             self.test_loader = DataLoader(self.data_test, batch_size = batch_size_test, shuffle=False)
@@ -3729,6 +3959,342 @@ class trainModel():
         return norms
 
 
+# ----------------------------
+# Extra evaluation suites
+# ----------------------------
+def _csv_list(self, s, cast=str):
+    if s is None:
+        return []
+    s = str(s).strip()
+    if not s:
+        return []
+    parts = [p.strip() for p in s.split(",") if p.strip()]
+    out = []
+    for p in parts:
+        try:
+            out.append(cast(p))
+        except Exception:
+            out.append(p)
+    return out
+
+def _should_run_extra_suites(self, iteration: int) -> bool:
+    every = int(getattr(self, "eval_extra_every", 0) or 0)
+    if every > 0:
+        return (int(iteration) % every) == 0
+    total = getattr(self, "total_epochs", None)
+    if total is None:
+        return False
+    return int(iteration) == int(total)
+
+def _eps_to_unit(self, eps: float) -> float:
+    # For CIFAR/SVHN/ImageNet we commonly specify eps in pixel units (2/4/8), convert to /255 if >1.
+    if self.dataset_name == "mnist":
+        return float(eps)
+    e = float(eps)
+    return (e / 255.0) if e > 1.0 else e
+
+def _get_norm_tensors(self):
+    mean = getattr(self.loader, "norm_mean", (0.0, 0.0, 0.0))
+    std = getattr(self.loader, "norm_std", (1.0, 1.0, 1.0))
+    mean_t = torch.tensor(mean, device=self.device, dtype=torch.float32).view(1, -1, 1, 1)
+    std_t = torch.tensor(std, device=self.device, dtype=torch.float32).view(1, -1, 1, 1)
+    return mean_t, std_t
+
+@torch.no_grad()
+def _eval_err_loss(self, loader, model):
+    model.eval()
+    ce = nn.CrossEntropyLoss(reduction="sum")
+    total_loss = 0.0
+    total_err = 0
+    total = 0
+    for X, y in loader:
+        X = X.to(self.device)
+        y = y.to(self.device)
+        logits = model(X)
+        total_loss += ce(logits, y).item()
+        total_err += (logits.argmax(dim=1) != y).sum().item()
+        total += int(y.shape[0])
+    if total <= 0:
+        return float("nan"), float("nan")
+    return total_err / total, total_loss / total
+
+def _pgd_linf_pixel(self, model, X, y, eps, steps, alpha, random_start=False):
+    # X is normalized; attack in pixel space then re-normalize.
+    mean_t, std_t = self._get_norm_tensors()
+    x0 = X * std_t + mean_t  # pixel space in [0,1] approximately
+    # init delta in pixel space
+    if random_start:
+        delta = torch.empty_like(x0).uniform_(-eps, eps)
+    else:
+        delta = torch.zeros_like(x0)
+    delta = delta.clamp(-x0, 1.0 - x0)
+    delta.requires_grad = True
+
+    loss_fn = nn.CrossEntropyLoss()
+
+    for _ in range(int(steps)):
+        x_adv = (x0 + delta).clamp(0.0, 1.0)
+        x_in = (x_adv - mean_t) / std_t
+        logits = model(x_in)
+        loss = loss_fn(logits, y)
+        loss.backward()
+
+        g = delta.grad.detach()
+        delta.data = (delta + float(alpha) * g.sign()).clamp(-eps, eps)
+        delta.data = delta.data.clamp(-x0, 1.0 - x0)
+        delta.grad.zero_()
+
+    x_adv = (x0 + delta).clamp(0.0, 1.0)
+    x_in = (x_adv - mean_t) / std_t
+    return x_in.detach()
+
+def _eval_adv_suite_simple(self, iteration: int):
+    if not bool(getattr(self, "eval_adv_suite", False)):
+        return
+    if not self._should_run_extra_suites(iteration):
+        return
+
+    attacks = [a.lower() for a in self._csv_list(getattr(self, "adv_attacks", ""), str)]
+    eps_list = [float(x) for x in self._csv_list(getattr(self, "adv_eps", ""), float)]
+    steps_list = [int(x) for x in self._csv_list(getattr(self, "adv_steps", ""), int)]
+    restarts = int(getattr(self, "adv_restarts", 1) or 1)
+    adv_pixel = bool(getattr(self, "adv_pixel", True))
+
+    # Build eps in unit space
+    eps_unit_list = [self._eps_to_unit(eps) for eps in eps_list]
+
+    model = self.model
+    model.eval()
+
+    for eps_raw, eps_u in zip(eps_list, eps_unit_list):
+        for steps in (steps_list if steps_list else [20]):
+            # alpha
+            a_override = getattr(self, "adv_alpha", None)
+            if a_override is None:
+                alpha_u = 2.0 * eps_u / max(1, int(steps))
+            else:
+                alpha_u = self._eps_to_unit(float(a_override)) if (self.dataset_name != "mnist") else float(a_override)
+
+            for atk in attacks:
+                if atk not in ("fgsm", "pgd_linf", "pgd_linf_rs"):
+                    continue
+
+                # FGSM == 1-step PGD
+                _steps = 1 if atk == "fgsm" else int(steps)
+                _rs = (atk == "pgd_linf_rs")
+
+                # Approx worst-case across restarts: take max error rate
+                best_err = -1.0
+                best_loss = None
+
+                for r in range(max(1, restarts if _rs else 1)):
+                    total_loss = 0.0
+                    total_err = 0
+                    total = 0
+                    ce_sum = nn.CrossEntropyLoss(reduction="sum")
+
+                    for X, y in self.loader.test_loader:
+                        X = X.to(self.device, dtype=torch.float32)
+                        y = y.to(self.device)
+
+                        if adv_pixel:
+                            X_adv = self._pgd_linf_pixel(model, X, y, eps=eps_u, steps=_steps, alpha=alpha_u, random_start=_rs)
+                        else:
+                            # fallback: normalized-space PGD (existing)
+                            delta = self.pgd_linf(model, X, y, epsilon=eps_u, num_iter=_steps, alpha=alpha_u, num_samples=1, CrossEntropyFunction=True, randomize=_rs)
+                            X_adv = (X + delta).detach()
+
+                        logits = model(X_adv)
+                        total_loss += ce_sum(logits, y).item()
+                        total_err += (logits.argmax(dim=1) != y).sum().item()
+                        total += int(y.shape[0])
+
+                    err = total_err / max(1, total)
+                    loss = total_loss / max(1, total)
+
+                    if err > best_err:
+                        best_err = err
+                        best_loss = loss
+
+                key_base = f"ADV/{atk}/eps{eps_raw}/steps{_steps}"
+                wandb.log({
+                    f"{key_base}/Error": best_err,
+                    f"{key_base}/Loss": float(best_loss) if best_loss is not None else float("nan"),
+                }, step=int(iteration))
+
+def _eval_c_suite_simple(self, iteration: int):
+    if not bool(getattr(self, "eval_c_suite", False)):
+        return
+    if not self._should_run_extra_suites(iteration):
+        return
+
+    ds = (self.dataset_name or "").lower()
+    if ds not in ("cifar10", "cifar100", "cifar10-c", "cifar100-c"):
+        return
+
+    # decide base
+    is_c10 = ds.startswith("cifar10")
+    base_root = getattr(self.loader, "data_root", "../data")
+
+    corrs = str(getattr(self, "c_corruptions", "gaussian_noise")).strip().lower()
+    if corrs == "all":
+        corr_list = CIFARNC.CORRUPTIONS
+    else:
+        corr_list = [c.strip() for c in corrs.split(",") if c.strip()]
+
+    sevs = [int(x) for x in self._csv_list(getattr(self, "c_severities", "5"), int)]
+    if not sevs:
+        sevs = [5]
+
+    # transform
+    mean_tup = getattr(self.loader, "norm_mean", (0.0, 0.0, 0.0))
+    std_tup = getattr(self.loader, "norm_std", (1.0, 1.0, 1.0))
+    tf = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(mean_tup, std_tup),
+    ])
+
+    # cache loaders to avoid re-building
+    if not hasattr(self, "_c_suite_cache"):
+        self._c_suite_cache = {}
+
+    for c in corr_list:
+        for s in sevs:
+            cache_key = (("c10" if is_c10 else "c100"), c, int(s))
+            if cache_key in self._c_suite_cache:
+                loader_c = self._c_suite_cache[cache_key]
+            else:
+                if is_c10:
+                    ds_c = CIFAR10C(base_root, name=c, severity=int(s), transform=tf)
+                else:
+                    ds_c = CIFAR100C(base_root, name=c, severity=int(s), transform=tf)
+                loader_c = DataLoader(ds_c, batch_size=32, shuffle=False)
+                self._c_suite_cache[cache_key] = loader_c
+
+            err, loss = self._eval_err_loss(loader_c, self.model)
+            key_base = f"C/{c}/s{s}"
+            wandb.log({
+                f"{key_base}/Error": err,
+                f"{key_base}/Loss": loss,
+            }, step=int(iteration))
+
+def _eval_longtail_metrics(self, iteration: int):
+    # Only meaningful when training is imbalanced
+    if not getattr(self.loader, "lt_enabled", False):
+        return
+    if not self._should_run_extra_suites(iteration):
+        return
+
+    num_classes = int(getattr(self.loader, "num_classes", 0) or 0)
+    if num_classes <= 1:
+        return
+
+    group = getattr(self.loader, "lt_group_per_class", None)
+    if group is None:
+        return
+
+    correct = np.zeros(num_classes, dtype=np.int64)
+    total = np.zeros(num_classes, dtype=np.int64)
+
+    self.model.eval()
+    with torch.no_grad():
+        for X, y in self.loader.test_loader:
+            X = X.to(self.device)
+            y = y.to(self.device)
+            pred = self.model(X).argmax(dim=1)
+
+            y_np = y.detach().cpu().numpy().astype(np.int64)
+            p_np = pred.detach().cpu().numpy().astype(np.int64)
+
+            total += np.bincount(y_np, minlength=num_classes)
+            correct += np.bincount(y_np[(p_np == y_np)], minlength=num_classes)
+
+    acc_per_cls = correct / np.maximum(1, total)
+    bal_acc = float(acc_per_cls.mean())
+
+    def _mean_group(gname):
+        idx = [i for i, gg in enumerate(group) if gg == gname]
+        if not idx:
+            return float("nan")
+        return float(acc_per_cls[idx].mean())
+
+    wandb.log({
+        "LT/BalancedAcc": bal_acc,
+        "LT/ManyAcc": _mean_group("many"),
+        "LT/MediumAcc": _mean_group("medium"),
+        "LT/FewAcc": _mean_group("few"),
+    }, step=int(iteration))
+
+def _dump_gates_npz(self, iteration: int):
+    if not bool(getattr(self, "dump_gates", False)):
+        return
+    if not self._should_run_extra_suites(iteration):
+        return
+    try:
+        from ecg_loss import ecg_gates
+    except Exception:
+        return
+
+    nmax = int(getattr(self, "dump_gates_n", 2000) or 2000)
+    out = {"y": [], "yhat": [], "correct": [], "pmax": [], "py": [], "margin": [], "gate": [], "scale": []}
+
+    self.model.eval()
+    seen = 0
+    with torch.no_grad():
+        for X, y in self.loader.test_loader:
+            X = X.to(self.device)
+            y = y.to(self.device)
+            logits = self.model(X)
+            gates = ecg_gates(
+                logits, y,
+                lam=float(getattr(self, "ecg_lam", 1.0)),
+                tau=float(getattr(self, "ecg_tau", 0.7)),
+                k=float(getattr(self, "ecg_k", 10.0)),
+                conf_type=str(getattr(self, "ecg_conf_type", "pmax")),
+                detach_gates=True,
+            )
+
+            yhat = logits.argmax(dim=1)
+            correct = (yhat == y).float()
+
+            out["y"].append(y.detach().cpu().numpy())
+            out["yhat"].append(yhat.detach().cpu().numpy())
+            out["correct"].append(correct.detach().cpu().numpy())
+
+            for k in ("pmax", "py", "margin", "gate", "scale"):
+                out[k].append(gates[k].detach().cpu().numpy())
+
+            seen += int(y.shape[0])
+            if seen >= nmax:
+                break
+
+    # concat + truncate
+    out2 = {}
+    for k, v in out.items():
+        if not v:
+            continue
+        arr = np.concatenate(v, axis=0)[:nmax]
+        out2[k] = arr
+
+    os.makedirs("./dumps", exist_ok=True)
+    fname = f"./dumps/{wandb.run.name if wandb.run is not None else 'run'}_gates_ep{int(iteration)}.npz"
+    np.savez_compressed(fname, **out2)
+
+    # record artifact path (relative) in wandb
+    try:
+        wandb.save(fname)
+    except Exception:
+        pass
+
+def _maybe_run_extra_suites(self, iteration: int):
+    # Orchestrator called from testModel_logs
+    if wandb.run is None:
+        return
+    self._eval_adv_suite_simple(iteration)
+    self._eval_c_suite_simple(iteration)
+    self._eval_longtail_metrics(iteration)
+    self._dump_gates_npz(iteration)
+
     def testModel_logs(self, dataset_name, models_name, iteration, alg, ratio ,epsilon, numIt, alpha, ratioADV, trainTime, write_pred_logs=False, num_samples=5, calibration=False):
 
         self.model.eval() # evaluate the model
@@ -3867,6 +4433,9 @@ class trainModel():
             "PGD/AUROC_err_conf": adv_extra.get("AUROC_err_conf", float("nan")),
             "PGD/AUROC_err_unc":  adv_extra.get("AUROC_err_unc", float("nan")),
         }, step=global_step)
+
+        # heavy suites (ADV / C / LT / dump) only at the final epoch or every N epochs
+        self._maybe_run_extra_suites(global_step)
 
         return test_err, test_loss, test_entropy, test_MI, adv_err, adv_loss, adv_entropy, adv_MI
 
@@ -4764,19 +5333,14 @@ class model(trainModel):
 
         if self.dataset_name == "imageNet":
             num_classes = 1000
-            # Decide whether we are training on original ILSVRC2012 (224) or downsampled SmallImageNet (<=64)
-            is_original = os.environ.get("IMAGENET_ORIGINAL", "0").lower() in ("1","true","yes","y")
-
-            # Defaults:
-            #   - original 224x224: ResNet-50 (strong baseline)
-            #   - downsampled (32/64): ResNet-18 (fast sanity check)
-            depth = int(os.environ.get("IMAGENET_DEPTH", "50" if is_original else "18"))
-            dropout_rate = float(os.environ.get("IMAGENET_DROPOUT", "0.3" if is_original else "0.0"))
+            depth = 50
+            dropout_rate = 0.3
 
             # IMPORTANT (ImageNet memory fix):
-            # Use torchvision ResNet (standard ImageNet stem) by default on 224x224.
-            default_tv = "1" if is_original else "0"
-            use_torchvision = os.environ.get("IMAGENET_TORCHVISION", default_tv).lower() in ("1","true","yes","y")
+            # Use the standard torchvision ResNet stem (stride-2 conv + maxpool) by default.
+            # Our custom ResNet implementation is CIFAR-style (no early downsampling),
+            # which can explode activation memory on 224x224 inputs and OOM even on H100.
+            use_torchvision = os.environ.get("IMAGENET_TORCHVISION", "1").lower() in ("1","true","yes","y")
 
             if use_torchvision:
                 # Use torchvision ResNet with the standard ImageNet stem (stride-2 conv + maxpool)
@@ -4840,7 +5404,7 @@ class model(trainModel):
             model = ResNet(BasicBlock, [2, 2, 2, 2], num_classes, depth, dropout_rate)
 #            return PreActResNet(PreActBlock, [2,2,2,2], num_classes, dropout_rate)
 
-        elif self.dataset_name == "cifar100":
+        elif self.dataset_name in ("cifar100", "cifar100-c"):
             num_classes=100
             depth = 28
             widen_factor=10
@@ -4865,9 +5429,17 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
          ecg_schedule, ecg_lam_start, ecg_lam_end, ecg_tau_start, ecg_tau_end, ecg_k_start, ecg_k_end, ecg_adapt_warmup, ecg_adapt_window,
          ecg_tau_target, ecg_tau_lr, ecg_tau_ema, ecg_tau_deadzone, ecg_tau_min, ecg_tau_max,
          device, devices_id, lr, momentum, batch, lr_adv, momentum_adv, batch_adv,
-         half_prec=False, variants='none', log_runtime=True, rt_sample_every=20):
+         half_prec=False, variants='none', log_runtime=True, rt_sample_every=20,
+         c_name="gaussian_noise", c_severity=5,
+         imbalance="none", imb_factor=1.0, imb_seed=0,
+         eval_c_suite=False, c_corruptions="gaussian_noise", c_severities="5",
+         eval_adv_suite=False, adv_attacks="fgsm,pgd_linf,pgd_linf_rs", adv_eps="2,4,8", adv_steps="10,20",
+         adv_restarts=1, adv_alpha=None, adv_pixel=True,
+         eval_extra_every=0, dump_gates=False, dump_gates_n=2000):
     
-    dataset_loader = dataset(dataset_name=dataset_name, batch_size = batch, batch_size_adv = batch_adv)
+    dataset_loader = dataset(dataset_name=dataset_name, batch_size = batch, batch_size_adv = batch_adv,
+                         c_name=c_name, c_severity=c_severity,
+                         imbalance=imbalance, imb_factor=imb_factor, imb_seed=imb_seed)
     model_cnn = model(dataset_loader, dataset_name, device, devices_id, lr, momentum, lr_adv, momentum_adv, batch_adv, half_prec=half_prec, variants=variants)
     # ECG hyperparams from CLI
     model_cnn.ecg_lam = float(ecg_lam)
@@ -4912,6 +5484,27 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
     # runtime diagnostics config
     model_cnn.log_runtime = bool(log_runtime)
     model_cnn.rt_sample_every = int(rt_sample_every)
+    # ---- suite configs (evaluation) ----
+    try:
+        model_cnn.total_epochs = int(stage1_epochs) + int(stage2_epochs)
+    except Exception:
+        model_cnn.total_epochs = None
+
+    model_cnn.eval_extra_every = int(eval_extra_every)
+    model_cnn.eval_c_suite = bool(eval_c_suite)
+    model_cnn.c_corruptions = str(c_corruptions)
+    model_cnn.c_severities = str(c_severities)
+
+    model_cnn.eval_adv_suite = bool(eval_adv_suite)
+    model_cnn.adv_attacks = str(adv_attacks)
+    model_cnn.adv_eps = str(adv_eps)
+    model_cnn.adv_steps = str(adv_steps)
+    model_cnn.adv_restarts = int(adv_restarts)
+    model_cnn.adv_alpha = adv_alpha
+    model_cnn.adv_pixel = bool(adv_pixel)
+
+    model_cnn.dump_gates = bool(dump_gates)
+    model_cnn.dump_gates_n = int(dump_gates_n)
 
     #trainTime, train_err, train_loss = model_cnn.run(modelName, iterations=int(stage1_epochs), stop=stop)
     model_cnn.run(runName, iterations=int(stage1_epochs), stop=stop, ckptName=ckptName, runName=runName)
@@ -4944,7 +5537,51 @@ if __name__ == '__main__':
     parser.add_argument('--num_iter', type=int, help='number of iterations for pgd ', default=10)
     parser.add_argument('--alpha', type=float, help='alpha', default=0.01)
     
-    parser.add_argument('--dataset', type=str, help='dataset', default="mnist", choices=['mnist', 'cifar10', 'cifar10-c', 'binaryCifar10', 'cifar100', 'imageNet', 'svhn'])
+    parser.add_argument('--dataset', type=str, help='dataset', default="mnist", choices=['mnist', 'cifar10', 'cifar10-c', 'binaryCifar10', 'cifar100', 'cifar100-c', 'imageNet', 'svhn'])
+
+    # ---- C-suite (Common Corruptions) controls ----
+    parser.add_argument("--c_name", type=str, default="gaussian_noise",
+                        help="When --dataset is cifar10-c/cifar100-c: which corruption to load (e.g., gaussian_noise).")
+    parser.add_argument("--c_severity", type=int, default=5,
+                        help="When --dataset is cifar10-c/cifar100-c: severity in {1..5}.")
+
+    parser.add_argument("--eval_c_suite", type=str2bool, default=False,
+                        help="If True: evaluate CIFAR-10-C / CIFAR-100-C as an extra suite (on top of STD/PGD).")
+    parser.add_argument("--c_corruptions", type=str, default="gaussian_noise",
+                        help="Comma-separated corruption list, or 'all'. Example: gaussian_noise,brightness")
+    parser.add_argument("--c_severities", type=str, default="5",
+                        help="Comma-separated severities. Example: 1,3,5")
+
+    # ---- Long-tail (imbalanced training) controls ----
+    parser.add_argument("--imbalance", type=str, default="none", choices=["none", "exp", "step"],
+                        help="Imbalanced training regime (train-time).")
+    parser.add_argument("--imb_factor", type=float, default=1.0,
+                        help="Imbalance factor: either >1 (e.g., 100 means min=max/100) or in (0,1] (e.g., 0.01).")
+    parser.add_argument("--imb_seed", type=int, default=0, help="Seed for long-tail subsampling.")
+
+    # ---- Extra adversarial evaluation suite (evaluation-time) ----
+    parser.add_argument("--eval_adv_suite", type=str2bool, default=False,
+                        help="If True: evaluate extra adversarial settings (FGSM/PGD with multiple eps/steps).")
+    parser.add_argument("--adv_attacks", type=str, default="fgsm,pgd_linf,pgd_linf_rs",
+                        help="Comma-separated attacks: fgsm,pgd_linf,pgd_linf_rs")
+    parser.add_argument("--adv_eps", type=str, default="2,4,8",
+                        help="Comma-separated eps. For CIFAR/SVHN/ImageNet: interpreted as /255 if >1.")
+    parser.add_argument("--adv_steps", type=str, default="10,20",
+                        help="Comma-separated steps for PGD attacks.")
+    parser.add_argument("--adv_restarts", type=int, default=1,
+                        help="Random restarts for pgd_linf_rs (approx: take max error across restarts).")
+    parser.add_argument("--adv_alpha", type=float, default=None,
+                        help="Step size. If None, uses 2*eps/steps.")
+    parser.add_argument("--adv_pixel", type=str2bool, default=True,
+                        help="If True: do attacks in pixel space (recommended when data is normalized).")
+
+    # ---- When to run the heavy suites ----
+    parser.add_argument("--eval_extra_every", type=int, default=0,
+                        help="0: only at the final epoch; >0: run every N epochs.")
+
+    # ---- Demo dump for boundary/gate analysis ----
+    parser.add_argument("--dump_gates", type=str2bool, default=False)
+    parser.add_argument("--dump_gates_n", type=int, default=2000)
 
     parser.add_argument('--stop', type=str, help='stop condition', default="epochs", choices=['epochs', 'time'])
     parser.add_argument('--stop_val', type=int, help='number of epochs or training time', default=10)
@@ -5259,5 +5896,11 @@ if __name__ == "__main__":
         args.lr, args.momentum, args.batch,
         args.lr_adv, args.momentum_adv, args.batch_adv,
         args.half_prec, args.variants,
-        args.log_runtime, args.rt_sample_every
+        args.log_runtime, args.rt_sample_every,
+        args.c_name, args.c_severity,
+        args.imbalance, args.imb_factor, args.imb_seed,
+        args.eval_c_suite, args.c_corruptions, args.c_severities,
+        args.eval_adv_suite, args.adv_attacks, args.adv_eps, args.adv_steps,
+        args.adv_restarts, args.adv_alpha, args.adv_pixel,
+        args.eval_extra_every, args.dump_gates, args.dump_gates_n
     )
