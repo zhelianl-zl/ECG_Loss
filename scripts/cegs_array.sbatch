@@ -48,11 +48,33 @@ AUTO_DOWNLOAD="${CEGS_AUTO_DOWNLOAD:-1}"
 
 mkdir -p "$RUNS_DIR" "$DATA_DIR"
 
-# ---- ImageNet-1k (ILSVRC2012) on Bridges-2: use shared community dataset via symlinks (no download, no copy) ----
-mkdir -p "$DATA_DIR/imageNet"
-ln -sfn /ocean/datasets/community/imagenet/train "$DATA_DIR/imageNet/train"
-ln -sfn /ocean/datasets/community/imagenet/val   "$DATA_DIR/imageNet/val"
-# -------------------------------------------------------------------------------------------------------------
+
+# ---- ImageNet dataset selection --------------------------------------------------------------
+# Control via environment:
+#   IMAGENET_ORIGINAL=1 -> use shared ILSVRC2012 folders (224x224 default)
+#   IMAGENET_ORIGINAL=0 -> use downsampled SmallImageNet pickles (32x32 / 64x64) for fast iteration
+IMAGENET_ORIGINAL="${IMAGENET_ORIGINAL:-1}"
+
+if [[ "$IMAGENET_ORIGINAL" == "1" ]]; then
+  # Keep original ILSVRC2012 separate to avoid colliding with SmallImageNet pickles.
+  mkdir -p "$DATA_DIR/imagenet1k"
+  ln -sfn /ocean/datasets/community/imagenet/train "$DATA_DIR/imagenet1k/train"
+  ln -sfn /ocean/datasets/community/imagenet/val   "$DATA_DIR/imagenet1k/val"
+  export IMAGENET_ROOT="${IMAGENET_ROOT:-$DATA_DIR/imagenet1k}"
+else
+  # Expected folder contains: train_data_batch_1..10 and val_data
+  RES="${IMAGENET_RES:-32}"
+  export IMAGENET_DS_ROOT="${IMAGENET_DS_ROOT:-$DATA_DIR/SmallImageNet_${RES}x${RES}}"
+fi
+
+# Default model impl:
+#   - original: torchvision ResNet (standard stem to prevent OOM)
+#   - downsampled: your custom CIFAR-style ResNet (faster on small inputs)
+if [[ -z "${IMAGENET_TORCHVISION:-}" ]]; then
+  if [[ "$IMAGENET_ORIGINAL" == "1" ]]; then export IMAGENET_TORCHVISION=1; else export IMAGENET_TORCHVISION=0; fi
+fi
+# ------------------------------------------------------------------------------------------------
+
 
 
 RUN="$RUNS_DIR/${SLURM_JOB_NAME}_${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
@@ -109,11 +131,11 @@ export CUBLAS_WORKSPACE_CONFIG=:4096:8
 export PYTHONHASHSEED=0
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 
-export IMAGENET_ORIGINAL=1
-export IMAGENET_TORCHVISION=1
-export IMAGENET_ROOT=/ocean/projects/cis260049p/zliu49/cegs_data/imageNet
-export DL_WORKERS=5                            # 可选
-export DEBUG_IMAGENET_SHAPE=1                  # 可选，确认 224
+# export IMAGENET_ORIGINAL=1  # (patched: don't force override)
+# export IMAGENET_TORCHVISION=1  # (patched: don't force override)
+
+export DL_WORKERS="${DL_WORKERS:-5}"  # DataLoader workers (SmallImageNet often fine with 0-4; ImageFolder may want 8+)
+export DEBUG_IMAGENET_SHAPE="${DEBUG_IMAGENET_SHAPE:-1}"  # Print first batch shape once
 
 # Activate conda env (Python 3.10)
 source "$HOME/miniconda3/etc/profile.d/conda.sh"

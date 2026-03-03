@@ -1,0 +1,4 @@
+#wandb_project=cegs-imagenet64-fast
+dataset	seed	stop	stop_val	lr	momentum	batch	workers	half_prec	variants	type	pe_mode	stage1_epochs	stage2_epochs	loss_stage1	loss_stage2	ecg_conf_type	ecg_detach_gates	ecg_schedule	ecg_lam_start	ecg_lam_end	ecg_tau_start	ecg_tau_end	ecg_k_start	ecg_k_end	force_run	method_name	run_kind
+imageNet	0	epochs	10	0.1	0.9	256	0	True	none	std	logk_rms	10	0	ce	ce	none	True	none							True	imagenet64_ce	quick
+imageNet	0	epochs	10	0.1	0.9	256	0	True	none	std	logk_rms	10	0	ecg	ecg	pmax	True	linear	0.00	0.10	0.60	0.90	8	12	True	imagenet64_cegs	quick
