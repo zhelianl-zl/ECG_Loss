@@ -48,12 +48,22 @@ AUTO_DOWNLOAD="${CEGS_AUTO_DOWNLOAD:-1}"
 
 mkdir -p "$RUNS_DIR" "$DATA_DIR"
 
-# ---- ImageNet-1k (ILSVRC2012) on Bridges-2: use shared community dataset via symlinks (no download, no copy) ----
-mkdir -p "$DATA_DIR/imageNet"
-ln -sfn /ocean/datasets/community/imagenet/train "$DATA_DIR/imageNet/train"
-ln -sfn /ocean/datasets/community/imagenet/val   "$DATA_DIR/imageNet/val"
+# ---- ImageNet: default 32x32 when conf path contains "imagenet32" or "imnet32" (e.g. RunA/RunB *_imagenet32_* / *_imnet32best.tsv); else 224x224 with shared dataset symlinks ----
+if [[ "$CONF" == *imagenet32* || "$CONF" == *imnet32* ]]; then
+  export IMAGENET_ORIGINAL="${IMAGENET_ORIGINAL:-0}"
+  export IMAGENET_RES="${IMAGENET_RES:-32}"
+  export IMAGENET_DS_ROOT="${IMAGENET_DS_ROOT:-$DATA_DIR/smallimagenet_32}"
+  export DL_WORKERS="${DL_WORKERS:-0}"
+else
+  mkdir -p "$DATA_DIR/imageNet"
+  ln -sfn /ocean/datasets/community/imagenet/train "$DATA_DIR/imageNet/train"
+  ln -sfn /ocean/datasets/community/imagenet/val   "$DATA_DIR/imageNet/val"
+  export IMAGENET_ORIGINAL="${IMAGENET_ORIGINAL:-1}"
+  export IMAGENET_TORCHVISION="${IMAGENET_TORCHVISION:-1}"
+  export IMAGENET_ROOT="${IMAGENET_ROOT:-$DATA_DIR/imageNet}"
+  export DL_WORKERS="${DL_WORKERS:-5}"
+fi
 # -------------------------------------------------------------------------------------------------------------
-
 
 RUN="$RUNS_DIR/${SLURM_JOB_NAME}_${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
 mkdir -p "$RUN" "$DATA_DIR" "$RUNS_DIR"
@@ -86,9 +96,6 @@ ln -sfn "$DATA_DIR" "$RUN/data"
 export CEGS_DATA_DIR="$DATA_DIR"
 export CEGS_AUTO_DOWNLOAD="$AUTO_DOWNLOAD"
 
-# Use original 224x224 ImageNet-1k
-export IMAGENET_ORIGINAL="${IMAGENET_ORIGINAL:-1}"
-
 # W&B isolation per task
 mkdir -p "$RUN/wandb"
 chmod 700 "$RUN/wandb" 2>/dev/null || true
@@ -108,12 +115,6 @@ export WANDB_TAGS="${WANDB_TAGS:-},slurm,job${SLURM_JOB_ID},array${SLURM_ARRAY_J
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
 export PYTHONHASHSEED=0
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
-
-export IMAGENET_ORIGINAL=1
-export IMAGENET_TORCHVISION=1
-export IMAGENET_ROOT=/ocean/projects/cis260049p/zliu49/cegs_data/imageNet
-export DL_WORKERS=5                            # 可选
-export DEBUG_IMAGENET_SHAPE=1                  # 可选，确认 224
 
 # Activate conda env (Python 3.10)
 source "$HOME/miniconda3/etc/profile.d/conda.sh"
