@@ -118,7 +118,8 @@ class Uncertainty(nn.Module):
         probs = None 
         for _ in range(num_samples):
             #MC dropout
-            model.enable_dropout()
+            if hasattr(model, "enable_dropout"):
+                model.enable_dropout()
             softmax_output = F.softmax( model(X), dim=1)
 
             if probs is None: probs = torch.zeros_like(softmax_output)
@@ -171,7 +172,8 @@ class Uncertainty(nn.Module):
         #entropy H
         for _ in range(num_samples):
             #MC dropout
-            model.enable_dropout()
+            if hasattr(model, "enable_dropout"):
+                model.enable_dropout()
             softmax_output = F.softmax(model(X), dim=1)
 
             if probs is None: probs = torch.zeros_like(softmax_output)
@@ -4012,8 +4014,9 @@ class trainModel():
             if self.deep_ensemble: # ensemble as already the softmax applied
                 softmax_output = model(X)
                 
-            else: 
-                model.enable_dropout()
+            else:
+                if hasattr(model, "enable_dropout"):
+                    model.enable_dropout()
                 softmax_output = F.softmax(model(X), dim=1)
             
                 if calibration and self.isCalibrated:
@@ -4563,7 +4566,8 @@ class trainModel():
                 for n in range(num_samples):
                     #need to enable dropout
                     model.eval() # evaluate the model
-                    model.enable_dropout()
+                    if hasattr(model, "enable_dropout"):
+                        model.enable_dropout()
 
                     if self.half_prec: 
                         with torch.cuda.amp.autocast(dtype=torch.float16):
@@ -4637,7 +4641,8 @@ class trainModel():
             for n in range(num_samples):
                 #need to enable dropout
                 model.eval() # evaluate the model
-                model.enable_dropout()
+                if hasattr(model, "enable_dropout"):
+                    model.enable_dropout()
 
                 if self.half_prec: 
                     with torch.cuda.amp.autocast(dtype=torch.float16):
