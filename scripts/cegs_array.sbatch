@@ -52,7 +52,17 @@ mkdir -p "$RUNS_DIR" "$DATA_DIR"
 if [[ "$CONF" == *imagenet32* || "$CONF" == *imnet32* ]]; then
   export IMAGENET_ORIGINAL="${IMAGENET_ORIGINAL:-0}"
   export IMAGENET_RES="${IMAGENET_RES:-32}"
-  export IMAGENET_DS_ROOT="${IMAGENET_DS_ROOT:-$DATA_DIR/smallimagenet_32}"
+  # Prefer existing dir: IMAGENET_DS_ROOT env, then DATA_DIR/smallimagenet_32, then sibling cegs_data/smallimagenet_32 (PSC: data often in .../cegs_data)
+  if [[ -n "${IMAGENET_DS_ROOT:-}" && -d "$IMAGENET_DS_ROOT" ]]; then
+    : # already set and valid
+  elif [[ -d "$DATA_DIR/smallimagenet_32" ]]; then
+    export IMAGENET_DS_ROOT="$DATA_DIR/smallimagenet_32"
+  elif [[ -d "$DATA_DIR/../cegs_data/smallimagenet_32" ]]; then
+    export IMAGENET_DS_ROOT="$DATA_DIR/../cegs_data/smallimagenet_32"
+  else
+    export IMAGENET_DS_ROOT="${IMAGENET_DS_ROOT:-$DATA_DIR/smallimagenet_32}"
+  fi
+  echo "IMAGENET_DS_ROOT=$IMAGENET_DS_ROOT"
   export DL_WORKERS="${DL_WORKERS:-0}"
 else
   mkdir -p "$DATA_DIR/imageNet"
