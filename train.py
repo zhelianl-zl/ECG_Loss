@@ -3806,7 +3806,11 @@ class trainModel():
 
                     t4 = time.time()
                     #adv_err, adv_loss = self.epoch_adversarial(self.loader.test_loader, self.model, "pgd", "", _eps_test, num_iterTest, alpha_test, 1, newLoss=False)
-                    adv_err, adv_loss, adv_entropy, adv_MI, adv_extra = self.test_epoch_adversarial(self.loader.test_loader, self.model, epsilon=_eps_test, num_iter=num_iterTest, alpha=alpha_test, num_samples=num_samples, models_name=models_name, write_pred_logs=write_pred_logs, iteration=iteration, calibration=calibration, return_details=True)
+                    adv_err, adv_loss, adv_entropy, adv_MI, adv_extra = self.test_epoch_adversarial(
+                        self.loader.test_loader, self.model, epsilon=_eps_test, num_iter=num_iterTest, alpha=alpha_test,
+                        num_samples=num_samples, models_name=models_name, write_pred_logs=write_pred_logs,
+                        iteration=iteration, calibration=calibration, return_details=True, attack_type="pgd_linf"
+                    )
                     #if _eps_test == epsilon:
                     #    adv_err, adv_loss, adv_entropy, adv_MI = _adv_err, _adv_loss, _adv_entropy, _adv_MI
 
@@ -3955,8 +3959,8 @@ class trainModel():
                 except Exception as e:
                     print(f"[extra_evals] C {corr} failed: {e}", flush=True)
 
-        # ---- LT metrics (CIFAR10 / CIFAR100 / SVHN when imbalance) ----
-        if imbalance not in ("none", "") and dataset_name in ("cifar10", "cifar100", "svhn"):
+        # ---- LT metrics (CIFAR10 / CIFAR100 / SVHN): log when imbalance is set OR whenever extra evals run (so RunB_LT and all runs get LT/) ----
+        if dataset_name in ("cifar10", "cifar100", "svhn"):
             try:
                 model.eval()
                 all_preds, all_labels = [], []

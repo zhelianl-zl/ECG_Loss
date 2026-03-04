@@ -15,6 +15,27 @@
 - After jobs finish, sync from login node:
   - `wandb sync $SCRATCH/cegs_runs/<run_id>/wandb`
 
+4) Data (CIFAR-C, ImageNet32) — one-time install:
+- C-suite (RunA/RunB) needs CIFAR-10-C and CIFAR-100-C under `$DATA_DIR`. Do this once (e.g. in `cegs_data` next to smallimagenet_32):
+
+```bash
+DATA_DIR=/ocean/projects/cis260049p/zliu49/cegs_data   # or your path
+mkdir -p "$DATA_DIR"
+cd "$DATA_DIR"
+
+# CIFAR-10-C
+curl -L -o CIFAR-10-C.tar "https://zenodo.org/record/2535967/files/CIFAR-10-C.tar?download=1"
+tar -xf CIFAR-10-C.tar
+
+# CIFAR-100-C
+curl -L -o CIFAR-100-C.tar "https://zenodo.org/record/3555552/files/CIFAR-100-C.tar?download=1"
+tar -xf CIFAR-100-C.tar
+```
+
+- Then set `DATA_DIR` when submitting (or in `submit_array.sh`):  
+  `export DATA_DIR=/ocean/projects/cis260049p/zliu49/cegs_data`
+- ImageNet32: same idea — put smallimagenet in a dir and set `IMAGENET_DS_ROOT` (and optionally `IMAGENET_RES=32`). No auto-download in the training script.
+
 ## Sweep config
 Edit `sweeps/cifar100.tsv`:
 - First non-comment line is header
