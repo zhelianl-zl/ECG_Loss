@@ -103,7 +103,8 @@ else
 fi
 
 export BASE CONF
-export DATA_DIR="${DATA_DIR:-$SCR/cegs_data}"
+# CIFAR-C (and optional data) under cegs; override with env DATA_DIR if needed
+export DATA_DIR="${DATA_DIR:-/ocean/projects/cis260049p/zliu49/cegs}"
 export RUNS_DIR="${RUNS_DIR:-$SCR/cegs_runs}"
 
 mkdir -p "$BASE/slurm_logs" "$DATA_DIR" "$RUNS_DIR" || true
