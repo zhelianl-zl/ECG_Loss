@@ -1106,8 +1106,8 @@ class dataset():
             else:
                 print("Downsampled dataset")
                 root_dir = os.environ.get('IMAGENET_DS_ROOT', '../data/imageNet/')
-                # For small/downsampled ImageNet: set IMAGENET_RES=32 or 64, and IMAGENET_DS_ROOT to the dataset folder.
-                resolution = int(os.environ.get('IMAGENET_RES', '64'))
+                # For small/downsampled ImageNet: IMAGENET_RES=32 or 64 (default 32), IMAGENET_DS_ROOT to the dataset folder.
+                resolution = int(os.environ.get('IMAGENET_RES', '32'))
                 classes = int(os.environ.get('IMAGENET_CLASSES', '1000'))
                 print(f"[DATA] SmallImageNet root: {root_dir}  (resolution={resolution}, classes={classes})", flush=True)
 
@@ -1931,6 +1931,7 @@ class trainModel():
             print("epoch number " + str(counter))
 
             self._ecg_on_epoch_begin(counter)
+            self._current_epoch = int(counter)  # for ImageNet periodic wandb step during epoch
 
             train_err, train_loss, misclassified_ids = self.epoch(loader.train_loader, model, opt, num_samples=num_samples, lagrangian=lagrangian)
             test_err, _, _, _, _, _, _, _ = self.testModel_logs(dataset, modelName, counter, 'standard', 0 ,0, 0, 0, 0, time.time() - t1, write_pred_logs, num_samples=num_samples)
@@ -2997,6 +2998,13 @@ class trainModel():
 
     def epoch(self, loader, model, opt=None, num_samples=5, lagrangian=None):
         """Standard training/evaluation epoch over the dataset"""
+        train_mode = model.training
+        if opt is None:
+            model.eval()
+            torch.set_grad_enabled(False)
+        else:
+            model.train()
+            torch.set_grad_enabled(True)
         total_loss, total_err = 0.,0.
         misclassified_ids = []
 
@@ -3070,6 +3078,14 @@ class trainModel():
                     _maxmem_g = torch.cuda.max_memory_allocated() / (1024**3) if torch.cuda.is_available() else 0.0
                     _imgs_s = float(X.size(0)) / max(_step_s, 1e-6)
                     print(f"[STEP] it={ct:05d} fetch={_fetch_s:.3f}s step={_step_s:.3f}s imgs/s={_imgs_s:.1f} loss={_loss_val:.4f} err={_err_frac:.3f} mem={_mem_g:.2f}G max={_maxmem_g:.2f}G", flush=True)
+                    # ImageNet: one epoch is ~5k batches; log to wandb every 500 batches so points appear before epoch end
+                    if self.dataset_name == "imageNet" and (ct + 1) % 500 == 0 and wandb.run is not None:
+                        _cur_epoch = int(getattr(self, "_current_epoch", 1))
+                        _global_step = (_cur_epoch - 1) * len(loader) + (ct + 1)
+                        try:
+                            wandb.log({"train/step_loss": _loss_val, "train/step_err": _err_frac}, step=_global_step)
+                        except Exception:
+                            pass
                 except Exception as _e:
                     print(f"[STEP] log failed: {_e}", flush=True)
 
@@ -3078,7 +3094,8 @@ class trainModel():
                 torch.cuda.empty_cache()
             _t_batch_start = time.time()
 
-
+        torch.set_grad_enabled(True)
+        model.train(train_mode)
         return total_err / len(loader.dataset), total_loss / len(loader.dataset), misclassified_ids
 
 
@@ -5371,6 +5388,12 @@ if __name__ == "__main__":
         args.loss_stage1 = "ecg"
         args.stage1_epochs = int(args.stop_val)
         args.stage2_epochs = 0
+
+    # ImageNet (e.g. 32x32): auto-enable stage2_fast so step2 doesn't run full-train find/CE every epoch (was 17h for 22 epoch)
+    if str(args.dataset).lower().startswith("imagenet") and int(args.stage2_epochs) > 0 and (not args.stage2_fast):
+        args.stage2_fast = True
+        args.stage2_find_every = max(args.stage2_find_every, 5)
+        args.stage2_ce_log_every = max(args.stage2_ce_log_every, 10)
 
     # Apply stage-1 loss selection
     if args.loss_stage1 == "ce":
