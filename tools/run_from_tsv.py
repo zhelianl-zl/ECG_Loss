@@ -302,6 +302,23 @@ def main() -> None:
             continue
         os.environ[k[len("env_"):]] = vv
 
+    # ImageNet: always 32x32. Set env so train.py finds SmallImageNet (even if sbatch did not).
+    if dataset.lower() == "imagenet":
+        os.environ["IMAGENET_ORIGINAL"] = "0"
+        os.environ["IMAGENET_RES"] = "32"
+        if not os.environ.get("IMAGENET_DS_ROOT", "").strip():
+            data_root_for_ds = Path(os.environ.get("CEGS_DATA_DIR", str(run_dir / "data"))).expanduser().resolve()
+            default_32 = data_root_for_ds / "smallimagenet_32"
+            alt_32 = data_root_for_ds.parent / "cegs_data" / "smallimagenet_32"
+            if default_32.exists():
+                os.environ["IMAGENET_DS_ROOT"] = str(default_32)
+            elif alt_32.exists():
+                os.environ["IMAGENET_DS_ROOT"] = str(alt_32)
+            else:
+                os.environ["IMAGENET_DS_ROOT"] = str(default_32)
+        if os.environ.get("DL_WORKERS", "").strip() == "":
+            os.environ["DL_WORKERS"] = "0"
+
 # data root
     data_root = Path(os.environ.get("CEGS_DATA_DIR", str(run_dir / "data"))).expanduser().resolve()
     auto_download = os.environ.get("CEGS_AUTO_DOWNLOAD", "1") not in ("0", "false", "False")
