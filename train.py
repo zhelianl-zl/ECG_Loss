@@ -1059,68 +1059,61 @@ class dataset():
 
 
         elif dataset_name ==  "imageNet":
+            # ImageNet: always 32x32 (SmallImageNet). 224x224 path commented out below; uncomment to restore.
             self.num_classes = 1000
-            if imageNet_original:
-                print("Original dataset")
-                # ImageNet root (PSC public dataset / user-provided path)
-                imagenet_root = os.environ.get("IMAGENET_ROOT", "").strip()
-                if not imagenet_root:
-                    data_dir_env = os.environ.get("DATA_DIR", "").strip()
-                    if data_dir_env:
-                        cand = os.path.join(data_dir_env, "imageNet")
-                        if os.path.isdir(os.path.join(cand, "train")) and os.path.isdir(os.path.join(cand, "val")):
-                            imagenet_root = cand
-                if not imagenet_root:
-                    imagenet_root = "../data/imageNet"
+            print("[DATA] Using ImageNet 32x32 (SmallImageNet)", flush=True)
+            root_dir = os.environ.get('IMAGENET_DS_ROOT', '../data/imageNet/')
+            resolution = int(os.environ.get('IMAGENET_RES', '32'))
+            classes = int(os.environ.get('IMAGENET_CLASSES', '1000'))
+            print(f"[DATA] SmallImageNet root: {root_dir}  (resolution={resolution}, classes={classes})", flush=True)
 
-                traindir = os.path.join(imagenet_root, "train")
-                valdir = os.path.join(imagenet_root, "val")
-                if (not os.path.isdir(traindir)) or (not os.path.isdir(valdir)):
-                    raise FileNotFoundError(
-                        f"ImageNet train/val not found. Set IMAGENET_ROOT to the directory containing 'train' and 'val'. "
-                        f"Got traindir={traindir}, valdir={valdir}"
-                    )
-                print(f"[DATA] ImageNet root: {imagenet_root}")
-                crop_size = 224
+            normalize = transforms.Normalize(mean=[0.4810,0.4574,0.4078], std=[0.2146,0.2104,0.2138])
+            tf_train = transforms.Compose([transforms.RandomHorizontalFlip(),transforms.ToTensor(),normalize,])
+            tf_test = transforms.Compose([transforms.ToTensor(),normalize,])
 
-                normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-                # --- ImageFolder scan can be slow on shared FS; time it for debugging ---
-                _t_scan = time.time()
-                print(f"[DATA] Building ImageFolder train from: {traindir}", flush=True)
-                self.data_train = datasets.ImageFolder( traindir, transforms.Compose([
-                        transforms.RandomResizedCrop(crop_size),
-                        transforms.RandomHorizontalFlip(),
-                        transforms.ToTensor(),normalize,
-                    ]))
-                print(f"[DATA] Train ImageFolder ready: {len(self.data_train)} samples, took {time.time()-_t_scan:.1f}s", flush=True)
-
-                _t_scan_val = time.time()
-                print(f"[DATA] Building ImageFolder val from: {valdir}", flush=True)
-                self.data_test = datasets.ImageFolder(valdir, transforms.Compose([
-                        transforms.Resize(256),
-                        transforms.CenterCrop(crop_size),
-                        transforms.ToTensor(),normalize,
-                    ]))
-                print(f"[DATA] Val ImageFolder ready: {len(self.data_test)} samples, took {time.time()-_t_scan_val:.1f}s", flush=True)
-
-            else:
-                print("Downsampled dataset")
-                root_dir = os.environ.get('IMAGENET_DS_ROOT', '../data/imageNet/')
-                # For small/downsampled ImageNet: IMAGENET_RES=32 or 64 (default 32), IMAGENET_DS_ROOT to the dataset folder.
-                resolution = int(os.environ.get('IMAGENET_RES', '32'))
-                classes = int(os.environ.get('IMAGENET_CLASSES', '1000'))
-                print(f"[DATA] SmallImageNet root: {root_dir}  (resolution={resolution}, classes={classes})", flush=True)
-
-                
-                normalize = transforms.Normalize(mean=[0.4810,0.4574,0.4078], std=[0.2146,0.2104,0.2138])
-
-                tf_train = transforms.Compose([transforms.RandomHorizontalFlip(),transforms.ToTensor(),normalize,])
-                tf_test = transforms.Compose([transforms.ToTensor(),normalize,])
-
-                self.data_train = SmallImagenet(root=root_dir, size=resolution, train=True, transform=tf_train, classes=range(classes), shuffle=True) 
-                self.data_test = SmallImagenet(root=root_dir, size=resolution, train=False, transform=tf_test, classes=range(classes)) 
-
+            self.data_train = SmallImagenet(root=root_dir, size=resolution, train=True, transform=tf_train, classes=range(classes), shuffle=True)
+            self.data_test = SmallImagenet(root=root_dir, size=resolution, train=False, transform=tf_test, classes=range(classes))
             self.data_val = self.data_test
+
+            # ----- 224x224 ImageFolder (commented out; uncomment block to restore) -----
+            # else:
+            #     print("[DATA] Using ImageNet 224x224 (ImageFolder)", flush=True)
+            #     imagenet_root = os.environ.get("IMAGENET_ROOT", "").strip()
+            #     if not imagenet_root:
+            #         data_dir_env = os.environ.get("DATA_DIR", "").strip()
+            #         if data_dir_env:
+            #             cand = os.path.join(data_dir_env, "imageNet")
+            #             if os.path.isdir(os.path.join(cand, "train")) and os.path.isdir(os.path.join(cand, "val")):
+            #                 imagenet_root = cand
+            #     if not imagenet_root:
+            #         imagenet_root = "../data/imageNet"
+            #     traindir = os.path.join(imagenet_root, "train")
+            #     valdir = os.path.join(imagenet_root, "val")
+            #     if (not os.path.isdir(traindir)) or (not os.path.isdir(valdir)):
+            #         raise FileNotFoundError(
+            #             f"ImageNet train/val not found. Set IMAGENET_ROOT to the directory containing 'train' and 'val'. "
+            #             f"Got traindir={traindir}, valdir={valdir}"
+            #         )
+            #     print(f"[DATA] ImageNet root: {imagenet_root}")
+            #     crop_size = 224
+            #     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            #     _t_scan = time.time()
+            #     print(f"[DATA] Building ImageFolder train from: {traindir}", flush=True)
+            #     self.data_train = datasets.ImageFolder( traindir, transforms.Compose([
+            #             transforms.RandomResizedCrop(crop_size),
+            #             transforms.RandomHorizontalFlip(),
+            #             transforms.ToTensor(),normalize,
+            #         ]))
+            #     print(f"[DATA] Train ImageFolder ready: {len(self.data_train)} samples, took {time.time()-_t_scan:.1f}s", flush=True)
+            #     _t_scan_val = time.time()
+            #     print(f"[DATA] Building ImageFolder val from: {valdir}", flush=True)
+            #     self.data_test = datasets.ImageFolder(valdir, transforms.Compose([
+            #             transforms.Resize(256),
+            #             transforms.CenterCrop(crop_size),
+            #             transforms.ToTensor(),normalize,
+            #         ]))
+            #     print(f"[DATA] Val ImageFolder ready: {len(self.data_test)} samples, took {time.time()-_t_scan_val:.1f}s", flush=True)
+            # self.data_val = self.data_test
 
             # DataLoader performance knobs (set DL_WORKERS env; default 5)
             DL_WORKERS = int(os.environ.get("DL_WORKERS", "5"))
