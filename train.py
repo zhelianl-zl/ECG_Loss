@@ -9,6 +9,26 @@ import torch.nn.functional as F
 #from torch.nn import init
 from torch.utils.data import Subset, ConcatDataset, TensorDataset
 
+
+def _longtail_train_indices(full_dataset, num_classes, imb_factor, imb_seed=None):
+    """Return indices for long-tail (exponential) training subset. Class k has n_max * (imb_factor)^(-k/(num_classes-1)) samples."""
+    if imb_factor is None or imb_factor <= 1:
+        return None
+    targets = np.asarray(getattr(full_dataset, "targets", getattr(full_dataset, "labels", None))).ravel()
+    if targets is None or len(targets) == 0:
+        return None
+    rng = np.random.default_rng(imb_seed)
+    max_per_class = len(targets) // num_classes
+    indices = []
+    for k in range(num_classes):
+        class_idx = np.where(targets == k)[0]
+        n_k = int(max_per_class * (imb_factor ** (-k / max(1, num_classes - 1))))
+        n_k = max(1, min(n_k, len(class_idx)))
+        chosen = rng.choice(class_idx, size=n_k, replace=False)
+        indices.extend(chosen.tolist())
+    rng.shuffle(indices)
+    return indices
+
 #models
 #from torchvision.models import resnet18
 #from torchvision.models import resnet50
@@ -902,7 +922,7 @@ class DEUP():
 
 
 class dataset():
-    def __init__(self, dataset_name="mnist", batch_size = 100,  batch_size_adv = 100):
+    def __init__(self, dataset_name="mnist", batch_size = 100,  batch_size_adv = 100, imbalance="none", imb_factor=None, imb_seed=None):
         batch_size_test = 32
         # the shuffle needs to be false for the DataLoader to more easily store the IDs of wrong classified inputs 
         self.batch_size = batch_size
@@ -969,6 +989,11 @@ class dataset():
             self.data_train = datasets.CIFAR10("../data", train=True, download=True, transform=train_transform)
             self.data_test = datasets.CIFAR10("../data", train=False, download=True, transform=test_transform)
             self.data_val = self.data_test
+            if (imbalance or "").strip().lower() in ("exp", "longtail") and imb_factor is not None:
+                lt_idx = _longtail_train_indices(self.data_train, 10, float(imb_factor), imb_seed)
+                if lt_idx is not None:
+                    self.data_train = Subset(self.data_train, lt_idx)
+                    print(f"[DATA] CIFAR10 long-tail: imb_factor={imb_factor}, train samples={len(lt_idx)}", flush=True)
 
             self.train_loader = DataLoader(self.data_train,    batch_size = batch_size, shuffle=False) if batch_size > 0 else None
             self.trainAvd_loader = DataLoader(self.data_train,    batch_size = batch_size_adv, shuffle=False) if batch_size_adv > 0 else None
@@ -1051,6 +1076,11 @@ class dataset():
             self.data_train = datasets.CIFAR100("../data", train=True, download=True, transform=train_transform)
             self.data_test = datasets.CIFAR100("../data", train=False, download=True, transform=test_transform)
             self.data_val = self.data_test
+            if (imbalance or "").strip().lower() in ("exp", "longtail") and imb_factor is not None:
+                lt_idx = _longtail_train_indices(self.data_train, 100, float(imb_factor), imb_seed)
+                if lt_idx is not None:
+                    self.data_train = Subset(self.data_train, lt_idx)
+                    print(f"[DATA] CIFAR100 long-tail: imb_factor={imb_factor}, train samples={len(lt_idx)}", flush=True)
 
             self.train_loader = DataLoader(self.data_train,    batch_size = batch_size, shuffle=False) if batch_size > 0 else None
             self.trainAvd_loader = DataLoader(self.data_train,    batch_size = batch_size_adv, shuffle=False) if batch_size_adv > 0 else None
@@ -1139,6 +1169,11 @@ class dataset():
             self.data_train = datasets.SVHN("../data", split='train', download=True, transform=transforms.ToTensor())
             self.data_test = datasets.SVHN("../data", split='test', download=True, transform=transforms.ToTensor())
             self.data_val = self.data_test
+            if (imbalance or "").strip().lower() in ("exp", "longtail") and imb_factor is not None:
+                lt_idx = _longtail_train_indices(self.data_train, 10, float(imb_factor), imb_seed)
+                if lt_idx is not None:
+                    self.data_train = Subset(self.data_train, lt_idx)
+                    print(f"[DATA] SVHN long-tail: imb_factor={imb_factor}, train samples={len(lt_idx)}", flush=True)
             
             self.train_loader = DataLoader(self.data_train, batch_size = batch_size, shuffle=False, pin_memory=True,) if batch_size > 0 else None
             self.trainAvd_loader = DataLoader(self.data_train, batch_size = batch_size_adv, shuffle=False, pin_memory=True,) if batch_size_adv > 0 else None
@@ -5013,9 +5048,10 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
          eval_extra_every=0, eval_adv_suite=False, adv_attacks='fgsm,pgd_linf,pgd_linf_rs',
          adv_eps=8, adv_steps=20, adv_restarts=1, adv_pixel=True,
          eval_c_suite=False, c_corruptions='gaussian_noise,brightness', c_severities=5,
-         imbalance='none', imb_factor=None):
+         imbalance='none', imb_factor=None, imb_seed=None):
     
-    dataset_loader = dataset(dataset_name=dataset_name, batch_size = batch, batch_size_adv = batch_adv)
+    dataset_loader = dataset(dataset_name=dataset_name, batch_size=batch, batch_size_adv=batch_adv,
+                             imbalance=imbalance, imb_factor=imb_factor, imb_seed=imb_seed)
     model_cnn = model(dataset_loader, dataset_name, device, devices_id, lr, momentum, lr_adv, momentum_adv, batch_adv, half_prec=half_prec, variants=variants)
     # ECG hyperparams from CLI
     model_cnn.ecg_lam = float(ecg_lam)
@@ -5473,4 +5509,5 @@ if __name__ == "__main__":
         getattr(args, "adv_steps", 20), getattr(args, "adv_restarts", 1), getattr(args, "adv_pixel", True),
         getattr(args, "eval_c_suite", False), getattr(args, "c_corruptions", "gaussian_noise,brightness"),
         getattr(args, "c_severities", 5), getattr(args, "imbalance", "none"), getattr(args, "imb_factor", None),
+        getattr(args, "imb_seed", None),
     )
