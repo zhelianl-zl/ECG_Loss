@@ -1485,6 +1485,7 @@ class trainModel():
             if wandb.run is not None:
                 wandb.log(
                     {
+                        "epoch": int(global_epoch),
                         "TIME/epoch_wall_s": epoch_wall_s,
                         "TIME/loss_call_ms": float(loss_ms_avg),
                         "TIME/loss_call_n": int(loss_n),
@@ -1601,6 +1602,7 @@ class trainModel():
             if wandb.run is not None:
                 wandb.log(
                     {
+                        "epoch": int(global_epoch),
                         "ECG/lam": float(getattr(self, "ecg_lam", 0.0)),
                         "ECG/tau": float(getattr(self, "ecg_tau", 0.0)),
                         "ECG/k": float(getattr(self, "ecg_k", 0.0)),
@@ -1625,7 +1627,7 @@ class trainModel():
             if wandb.run is not None and getattr(self, "_ecg_stat_n", 0) > 0:
                 avg = {f"ECG/{k}": (v / float(self._ecg_stat_n)) for k, v in getattr(self, "_ecg_stat_sum", {}).items()}
                 if avg:
-                    wandb.log(avg, step=int(global_epoch))
+                    wandb.log({"epoch": int(global_epoch), **avg}, step=int(global_epoch))
         except Exception:
             pass
 
@@ -1677,6 +1679,7 @@ class trainModel():
                             if wandb.run is not None:
                                 wandb.log(
                                     {
+                                        "epoch": int(global_epoch),
                                         "ECG/tau_target_active_frac": float(active_used),
                                         "ECG/tau_target_raw_active_frac": float(active),
                                         "ECG/tau_target": float(target),
@@ -1702,7 +1705,7 @@ class trainModel():
                     # log
                     try:
                         if wandb.run is not None:
-                            wandb.log({"ECG/lam_after": float(self.ecg_lam), "ECG/k_after": float(self.ecg_k)}, step=int(global_epoch))
+                            wandb.log({"epoch": int(global_epoch), "ECG/lam_after": float(self.ecg_lam), "ECG/k_after": float(self.ecg_k)}, step=int(global_epoch))
                     except Exception:
                         pass
             except Exception:
@@ -1751,6 +1754,7 @@ class trainModel():
             if wandb.run is not None:
                 wandb.log(
                     {
+                        "epoch": int(global_epoch),
                         "ECG/adapt_delta_err": float(delta),
                         "ECG/adapt_next_lam": float(st["lam"]),
                         "ECG/adapt_next_tau": float(st["tau"]),
@@ -3896,8 +3900,9 @@ class trainModel():
         f.close()
         self.model.train() # go back to train mode
 
-        # step = epoch (1, 2, ...) so chart x-axis is epoch
+        # step = epoch (1, 2, ...); include "epoch" so Wandb can use it as x-axis
         wandb.log({
+            "epoch": int(iteration),
             # STD
             "STD/Error": test_err,
             "STD/Entropy": test_entropy,
@@ -5397,6 +5402,13 @@ def init_wandb_if_needed(args, default_name: str):
         job_type=os.environ.get("WANDB_JOB_TYPE", None),
         config=vars(args),
     )
+    # Make charts use "epoch" as x-axis by default (instead of Step)
+    try:
+        wandb.define_metric("epoch")
+        for prefix in ("train/*", "STD/*", "PGD/*", "ECG/*", "ADV/*", "C/*", "LT/*", "TIME/*", "config/*"):
+            wandb.define_metric(prefix, step_metric="epoch")
+    except Exception:
+        pass
 
     global PE_MODE, Normalize_entropy, USE_PE_RMS
     PE_MODE = args.pe_mode
@@ -5494,6 +5506,7 @@ if __name__ == "__main__":
             tau_s = getattr(args, "ecg_tau_start", None)
             k_s = getattr(args, "ecg_k_start", None)
             wandb.log({
+                "epoch": 0,
                 "config/ecg_lam_start": float(lam_s) if lam_s is not None else 0.0,
                 "config/ecg_tau_start": float(tau_s) if tau_s is not None else 0.0,
                 "config/ecg_k_start": float(k_s) if k_s is not None else 0.0,
