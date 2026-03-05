@@ -1104,6 +1104,10 @@ class dataset():
             self.data_train = SmallImagenet(root=root_dir, size=resolution, train=True, transform=tf_train, classes=range(classes), shuffle=True)
             self.data_test = SmallImagenet(root=root_dir, size=resolution, train=False, transform=tf_test, classes=range(classes))
             self.data_val = self.data_test
+            # Log actual tensor shape so logs show 32x32 vs 224 on cluster
+            _x, _ = self.data_train[0]
+            _shape = _x.shape if hasattr(_x, "shape") else getattr(_x, "size", None)
+            print(f"[DATA] ImageNet train sample shape: {_shape}  (expect (3,{resolution},{resolution}) for 32x32)", flush=True)
 
             # ----- 224x224 ImageFolder (commented out; uncomment block to restore) -----
             # else:
@@ -1489,7 +1493,7 @@ class trainModel():
                         "TIME/backend": str(backend),
                         "TIME/rt_sample_every": int(getattr(self, "rt_sample_every", 0)),
                     },
-                    step=int(global_epoch),
+                    step=int(global_epoch) * getattr(self, "_steps_per_epoch", 5000),
                 )
         except Exception:
             pass
@@ -1603,7 +1607,7 @@ class trainModel():
                         "ECG/schedule_progress": float(self._ecg_schedule_progress(global_epoch)),
                         "ECG/schedule": str(sched),
                     },
-                    step=int(global_epoch),
+                    step=int(global_epoch) * getattr(self, "_steps_per_epoch", 5000),
                 )
         except Exception:
             pass
@@ -1621,7 +1625,7 @@ class trainModel():
             if wandb.run is not None and getattr(self, "_ecg_stat_n", 0) > 0:
                 avg = {f"ECG/{k}": (v / float(self._ecg_stat_n)) for k, v in getattr(self, "_ecg_stat_sum", {}).items()}
                 if avg:
-                    wandb.log(avg, step=int(global_epoch))
+                    wandb.log(avg, step=int(global_epoch) * getattr(self, "_steps_per_epoch", 5000))
         except Exception:
             pass
 
@@ -1679,7 +1683,7 @@ class trainModel():
                                         "ECG/tau_target_err": float(err),
                                         "ECG/tau_after": float(getattr(self, "ecg_tau", 0.0)),
                                     },
-                                    step=int(global_epoch),
+                                    step=int(global_epoch) * getattr(self, "_steps_per_epoch", 5000),
                                 )
                         except Exception:
                             pass
@@ -1698,7 +1702,7 @@ class trainModel():
                     # log
                     try:
                         if wandb.run is not None:
-                            wandb.log({"ECG/lam_after": float(self.ecg_lam), "ECG/k_after": float(self.ecg_k)}, step=int(global_epoch))
+                            wandb.log({"ECG/lam_after": float(self.ecg_lam), "ECG/k_after": float(self.ecg_k)}, step=int(global_epoch) * getattr(self, "_steps_per_epoch", 5000))
                     except Exception:
                         pass
             except Exception:
@@ -1752,7 +1756,7 @@ class trainModel():
                         "ECG/adapt_next_tau": float(st["tau"]),
                         "ECG/adapt_next_k": float(st["k"]),
                     },
-                    step=int(global_epoch),
+                    step=int(global_epoch) * getattr(self, "_steps_per_epoch", 5000),
                 )
         except Exception:
             pass
@@ -1933,16 +1937,17 @@ class trainModel():
                 model = _model
                 opt = _opt
                 counter += 1
-                # ===== W&B anchor: 补打一条 step=it（通常就是 30）=====
+                # ===== W&B anchor: use step = it * steps_per_epoch for monotonic steps =====
                 try:
                     if wandb.run is not None:
+                        _sp = getattr(self, "_steps_per_epoch", 5000)
                         wandb.log({
                             "train/loss": float(train_loss),
                             "train/err":  float(train_err),
                             "epoch": int(it),
                             "stage": 1,
                             "anchor": 1,
-                        }, step=int(it))
+                        }, step=int(it) * _sp)
                         print(f"[W&B] anchor logged at step={it}", flush=True)
                 except Exception as e:
                     print("[W&B anchor skipped]", e, flush=True)
@@ -1953,6 +1958,9 @@ class trainModel():
         if _model is None: 
             it=0
             t1 = time.time()
+
+        # Unify wandb step: use (epoch * steps_per_epoch) so step is monotonic with per-batch logs
+        self._steps_per_epoch = len(loader.train_loader) if (loader.train_loader is not None) else 5000
 
         for counter in range(it+1, iterations+1):
             if counter == iterations: write_pred_logs = True
@@ -1965,10 +1973,11 @@ class trainModel():
             test_err, _, _, _, _, _, _, _ = self.testModel_logs(dataset, modelName, counter, 'standard', 0 ,0, 0, 0, 0, time.time() - t1, write_pred_logs, num_samples=num_samples)
             self._ecg_on_epoch_end(counter, metric=test_err)
 
-            # ===== W&B: log once per epoch (step1) =====
+            # ===== W&B: log once per epoch (step = epoch * steps_per_epoch for monotonic steps) =====
             try:
                 if wandb.run is not None:
-                    global_step = int(counter)
+                    _sp = getattr(self, "_steps_per_epoch", 5000)
+                    global_step = int(counter) * _sp
                     wandb.log({
                         "train/loss": float(train_loss),
                         "train/err":  float(train_err),
@@ -2134,13 +2143,14 @@ class trainModel():
 
                     try:
                         if wandb.run is not None:
+                            _sp = getattr(self, "_steps_per_epoch", 5000)
                             wandb.log({
                                 "train/loss": float(ce_loss),
                                 "train/err":  float(ce_err),
                                 "epoch": int(global_step),
                                 "lr": float(opt.param_groups[0]["lr"]),
                                 "stage": 2,
-                            }, step=int(global_step))
+                            }, step=int(global_step) * _sp)
                             print(f"[W&B] stage2 logged epoch={global_step} loss={ce_loss:.4f} err={ce_err:.4f}", flush=True)
                     except Exception as e:
                         print("[W&B log skipped]", e, flush=True)
@@ -3106,14 +3116,6 @@ class trainModel():
                     _maxmem_g = torch.cuda.max_memory_allocated() / (1024**3) if torch.cuda.is_available() else 0.0
                     _imgs_s = float(X.size(0)) / max(_step_s, 1e-6)
                     print(f"[STEP] it={ct:05d} fetch={_fetch_s:.3f}s step={_step_s:.3f}s imgs/s={_imgs_s:.1f} loss={_loss_val:.4f} err={_err_frac:.3f} mem={_mem_g:.2f}G max={_maxmem_g:.2f}G", flush=True)
-                    # ImageNet: one epoch is ~5k batches; log to wandb every 500 batches so points appear before epoch end
-                    if self.dataset_name == "imageNet" and (ct + 1) % 500 == 0 and wandb.run is not None:
-                        _cur_epoch = int(getattr(self, "_current_epoch", 1))
-                        _global_step = (_cur_epoch - 1) * len(loader) + (ct + 1)
-                        try:
-                            wandb.log({"train/step_loss": _loss_val, "train/step_err": _err_frac}, step=_global_step)
-                        except Exception:
-                            pass
                 except Exception as _e:
                     print(f"[STEP] log failed: {_e}", flush=True)
 
@@ -3901,7 +3903,8 @@ class trainModel():
         f.close()
         self.model.train() # go back to train mode
 
-        global_step = int(iteration)
+        _sp = getattr(self, "_steps_per_epoch", 5000)
+        global_step = int(iteration) * _sp
         wandb.log({
             # STD
             "STD/Error": test_err,
@@ -4044,7 +4047,8 @@ class trainModel():
             to_log["epoch"] = int(global_epoch)
             try:
                 if wandb.run is not None:
-                    wandb.log(to_log, step=int(global_epoch))
+                    _sp = getattr(self, "_steps_per_epoch", 5000)
+                    wandb.log(to_log, step=int(global_epoch) * _sp)
                     print(f"[W&B] extra evals logged at epoch {global_epoch}: {list(to_log.keys())}", flush=True)
             except Exception as e:
                 print("[W&B extra_evals log skipped]", e, flush=True)
