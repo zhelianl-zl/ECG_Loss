@@ -244,14 +244,16 @@ def main() -> None:
     if not project:
         project = choose_wandb_project(dataset)
 
-    # Slurm ids (for cancel)
+    # Slurm ids (for cancel and wandb name suffix)
     array_job = os.environ.get("SLURM_ARRAY_JOB_ID") or os.environ.get("SLURM_JOB_ID") or "noj"
     task_id = os.environ.get("SLURM_ARRAY_TASK_ID") or str(args.idx)
+    job_task_suffix = f"_j{array_job}_t{task_id}"
 
-    # Run name (TSV override supported)
+    # Run name (TSV override supported). RunA/RunB: always append j<job>_t<task> for tracking.
     tsv_wandb_name = (hp.get("wandb_name") or "").strip()
     if tsv_wandb_name:
-        run_name = tsv_wandb_name
+        base = _safe_token(tsv_wandb_name)[: 200 - len(job_task_suffix)]
+        run_name = base + job_task_suffix
     else:
         raw = (
             f"{dataset}"
@@ -263,7 +265,7 @@ def main() -> None:
             f"_lam{lam_part}"
             f"_tau{tau_part}"
             f"_k{k_part}"
-            f"_j{array_job}_t{task_id}"
+            f"{job_task_suffix}"
         )
         run_name = _safe_token(raw)[:200]
 
