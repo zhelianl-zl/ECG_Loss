@@ -1149,8 +1149,8 @@ class dataset():
             #     print(f"[DATA] Val ImageFolder ready: {len(self.data_test)} samples, took {time.time()-_t_scan_val:.1f}s", flush=True)
             # self.data_val = self.data_test
 
-            # DataLoader performance knobs (set DL_WORKERS env; default 5)
-            DL_WORKERS = int(os.environ.get("DL_WORKERS", "5"))
+            # DataLoader: num_workers=0 = single-thread load = GPU starves, very slow. Use 4–10 for 32x32.
+            DL_WORKERS = int(os.environ.get("DL_WORKERS", "10"))
             DL_WORKERS = max(DL_WORKERS, 0)
             print(f"[DATA] DataLoader: num_workers={DL_WORKERS} pin_memory=True persistent_workers={DL_WORKERS>0}", flush=True)
             DL_KW = dict(
@@ -1493,7 +1493,7 @@ class trainModel():
                         "TIME/backend": str(backend),
                         "TIME/rt_sample_every": int(getattr(self, "rt_sample_every", 0)),
                     },
-                    step=int(global_epoch) * getattr(self, "_steps_per_epoch", 5000),
+                    step=int(global_epoch),
                 )
         except Exception:
             pass
@@ -1607,7 +1607,7 @@ class trainModel():
                         "ECG/schedule_progress": float(self._ecg_schedule_progress(global_epoch)),
                         "ECG/schedule": str(sched),
                     },
-                    step=int(global_epoch) * getattr(self, "_steps_per_epoch", 5000),
+                    step=int(global_epoch),
                 )
         except Exception:
             pass
@@ -1625,7 +1625,7 @@ class trainModel():
             if wandb.run is not None and getattr(self, "_ecg_stat_n", 0) > 0:
                 avg = {f"ECG/{k}": (v / float(self._ecg_stat_n)) for k, v in getattr(self, "_ecg_stat_sum", {}).items()}
                 if avg:
-                    wandb.log(avg, step=int(global_epoch) * getattr(self, "_steps_per_epoch", 5000))
+                    wandb.log(avg, step=int(global_epoch))
         except Exception:
             pass
 
@@ -1683,7 +1683,7 @@ class trainModel():
                                         "ECG/tau_target_err": float(err),
                                         "ECG/tau_after": float(getattr(self, "ecg_tau", 0.0)),
                                     },
-                                    step=int(global_epoch) * getattr(self, "_steps_per_epoch", 5000),
+                                    step=int(global_epoch),
                                 )
                         except Exception:
                             pass
@@ -1702,7 +1702,7 @@ class trainModel():
                     # log
                     try:
                         if wandb.run is not None:
-                            wandb.log({"ECG/lam_after": float(self.ecg_lam), "ECG/k_after": float(self.ecg_k)}, step=int(global_epoch) * getattr(self, "_steps_per_epoch", 5000))
+                            wandb.log({"ECG/lam_after": float(self.ecg_lam), "ECG/k_after": float(self.ecg_k)}, step=int(global_epoch))
                     except Exception:
                         pass
             except Exception:
@@ -1756,7 +1756,7 @@ class trainModel():
                         "ECG/adapt_next_tau": float(st["tau"]),
                         "ECG/adapt_next_k": float(st["k"]),
                     },
-                    step=int(global_epoch) * getattr(self, "_steps_per_epoch", 5000),
+                    step=int(global_epoch),
                 )
         except Exception:
             pass
@@ -1937,17 +1937,16 @@ class trainModel():
                 model = _model
                 opt = _opt
                 counter += 1
-                # ===== W&B anchor: use step = it * steps_per_epoch for monotonic steps =====
+                # ===== W&B anchor: step = last epoch of stage1 =====
                 try:
                     if wandb.run is not None:
-                        _sp = getattr(self, "_steps_per_epoch", 5000)
                         wandb.log({
                             "train/loss": float(train_loss),
                             "train/err":  float(train_err),
                             "epoch": int(it),
                             "stage": 1,
                             "anchor": 1,
-                        }, step=int(it) * _sp)
+                        }, step=int(it))
                         print(f"[W&B] anchor logged at step={it}", flush=True)
                 except Exception as e:
                     print("[W&B anchor skipped]", e, flush=True)
@@ -1958,9 +1957,6 @@ class trainModel():
         if _model is None: 
             it=0
             t1 = time.time()
-
-        # Unify wandb step: use (epoch * steps_per_epoch) so step is monotonic with per-batch logs
-        self._steps_per_epoch = len(loader.train_loader) if (loader.train_loader is not None) else 5000
 
         for counter in range(it+1, iterations+1):
             if counter == iterations: write_pred_logs = True
@@ -1973,18 +1969,16 @@ class trainModel():
             test_err, _, _, _, _, _, _, _ = self.testModel_logs(dataset, modelName, counter, 'standard', 0 ,0, 0, 0, 0, time.time() - t1, write_pred_logs, num_samples=num_samples)
             self._ecg_on_epoch_end(counter, metric=test_err)
 
-            # ===== W&B: log once per epoch (step = epoch * steps_per_epoch for monotonic steps) =====
+            # ===== W&B: one point per epoch, step = epoch (1, 2, ..., 60) =====
             try:
                 if wandb.run is not None:
-                    _sp = getattr(self, "_steps_per_epoch", 5000)
-                    global_step = int(counter) * _sp
                     wandb.log({
                         "train/loss": float(train_loss),
                         "train/err":  float(train_err),
                         "epoch": int(counter),
                         "lr": float(opt.param_groups[0]["lr"]),
                         "stage": 1,
-                    }, step=global_step)
+                    }, step=int(counter))
                     print(f"[W&B] logged epoch={counter} loss={float(train_loss):.4f} err={float(train_err):.4f}", flush=True)
             except Exception as e:
                 print("[W&B log skipped]", e, flush=True)
@@ -2143,14 +2137,13 @@ class trainModel():
 
                     try:
                         if wandb.run is not None:
-                            _sp = getattr(self, "_steps_per_epoch", 5000)
                             wandb.log({
                                 "train/loss": float(ce_loss),
                                 "train/err":  float(ce_err),
                                 "epoch": int(global_step),
                                 "lr": float(opt.param_groups[0]["lr"]),
                                 "stage": 2,
-                            }, step=int(global_step) * _sp)
+                            }, step=int(global_step))
                             print(f"[W&B] stage2 logged epoch={global_step} loss={ce_loss:.4f} err={ce_err:.4f}", flush=True)
                     except Exception as e:
                         print("[W&B log skipped]", e, flush=True)
@@ -3903,8 +3896,7 @@ class trainModel():
         f.close()
         self.model.train() # go back to train mode
 
-        _sp = getattr(self, "_steps_per_epoch", 5000)
-        global_step = int(iteration) * _sp
+        # step = epoch (1, 2, ...) so chart x-axis is epoch
         wandb.log({
             # STD
             "STD/Error": test_err,
@@ -3932,7 +3924,7 @@ class trainModel():
 
             "PGD/AUROC_err_conf": adv_extra.get("AUROC_err_conf", float("nan")),
             "PGD/AUROC_err_unc":  adv_extra.get("AUROC_err_unc", float("nan")),
-        }, step=global_step)
+        }, step=int(iteration))
 
         return test_err, test_loss, test_entropy, test_MI, adv_err, adv_loss, adv_entropy, adv_MI
 
@@ -4047,8 +4039,7 @@ class trainModel():
             to_log["epoch"] = int(global_epoch)
             try:
                 if wandb.run is not None:
-                    _sp = getattr(self, "_steps_per_epoch", 5000)
-                    wandb.log(to_log, step=int(global_epoch) * _sp)
+                    wandb.log(to_log, step=int(global_epoch))
                     print(f"[W&B] extra evals logged at epoch {global_epoch}: {list(to_log.keys())}", flush=True)
             except Exception as e:
                 print("[W&B extra_evals log skipped]", e, flush=True)
@@ -5494,6 +5485,21 @@ if __name__ == "__main__":
         sys.exit(0)
 
     init_wandb_if_needed(args, default_name=runName)
+
+    # Log varying hyperparams at step=0 so Wandb charts can "Color by" / "Group by" and show separate run curves
+    try:
+        import wandb
+        if wandb.run is not None:
+            lam_s = getattr(args, "ecg_lam_start", None)
+            tau_s = getattr(args, "ecg_tau_start", None)
+            k_s = getattr(args, "ecg_k_start", None)
+            wandb.log({
+                "config/ecg_lam_start": float(lam_s) if lam_s is not None else 0.0,
+                "config/ecg_tau_start": float(tau_s) if tau_s is not None else 0.0,
+                "config/ecg_k_start": float(k_s) if k_s is not None else 0.0,
+            }, step=0)
+    except Exception:
+        pass
 
     main(
         ckptName, runName, dataset_name,

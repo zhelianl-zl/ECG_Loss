@@ -63,7 +63,7 @@ if [[ "$CONF" == *imagenet32* || "$CONF" == *imnet32* ]]; then
     export IMAGENET_DS_ROOT="${IMAGENET_DS_ROOT:-$DATA_DIR/smallimagenet_32}"
   fi
   echo "IMAGENET_DS_ROOT=$IMAGENET_DS_ROOT"
-  export DL_WORKERS="${DL_WORKERS:-0}"
+  export DL_WORKERS="${DL_WORKERS:-10}"
 else
   mkdir -p "$DATA_DIR/imageNet"
   ln -sfn /ocean/datasets/community/imagenet/train "$DATA_DIR/imageNet/train"
