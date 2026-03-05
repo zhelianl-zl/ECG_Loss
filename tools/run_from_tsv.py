@@ -316,8 +316,9 @@ def main() -> None:
                 os.environ["IMAGENET_DS_ROOT"] = str(alt_32)
             else:
                 os.environ["IMAGENET_DS_ROOT"] = str(default_32)
+        # Use multiple DataLoader workers for 32x32 so GPU isn't starved (0 = single-thread = very slow)
         if os.environ.get("DL_WORKERS", "").strip() == "":
-            os.environ["DL_WORKERS"] = "0"
+            os.environ["DL_WORKERS"] = "10"
 
 # data root
     data_root = Path(os.environ.get("CEGS_DATA_DIR", str(run_dir / "data"))).expanduser().resolve()
