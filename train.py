@@ -1335,8 +1335,13 @@ class trainModel():
         self.ecg_lam_start = self.ecg_lam_base if lam_start is None else float(lam_start)
         self.ecg_lam_end = self.ecg_lam_base if lam_end is None else float(lam_end)
 
-        self.ecg_tau_start = self.ecg_tau_base if tau_start is None else float(tau_start)
-        self.ecg_tau_end = self.ecg_tau_base if tau_end is None else float(tau_end)
+        # tau: support "quantile" rule (tau = quantile of pmax per batch) via tau_rule/tau_quantile
+        if getattr(self, "ecg_tau_rule", None) == "quantile":
+            self.ecg_tau_start = None
+            self.ecg_tau_end = None
+        else:
+            self.ecg_tau_start = self.ecg_tau_base if tau_start is None else float(tau_start)
+            self.ecg_tau_end = self.ecg_tau_base if tau_end is None else float(tau_end)
 
         self.ecg_k_start = self.ecg_k_base if k_start is None else float(k_start)
         self.ecg_k_end = self.ecg_k_base if k_end is None else float(k_end)
@@ -1355,7 +1360,8 @@ class trainModel():
         # Initialize visible params for scheduled modes
         if self.ecg_schedule in ("linear", "cosine"):
             self.ecg_lam = float(self.ecg_lam_start)
-            self.ecg_tau = float(self.ecg_tau_start)
+            if getattr(self, "ecg_tau_rule", None) != "quantile":
+                self.ecg_tau = float(self.ecg_tau_start) if self.ecg_tau_start is not None else self.ecg_tau_base
             self.ecg_k = float(self.ecg_k_start)
         elif self.ecg_schedule == "tau_target":
             # For tau_target, tau is controlled adaptively during training,
@@ -1568,14 +1574,23 @@ class trainModel():
 
         if sched in ("linear", "cosine"):
             t = self._ecg_schedule_progress(global_epoch)
-            if sched == "linear":
-                self.ecg_lam = self._ecg_interp(self.ecg_lam_start, self.ecg_lam_end, t)
-                self.ecg_tau = self._ecg_interp(self.ecg_tau_start, self.ecg_tau_end, t)
-                self.ecg_k = self._ecg_interp(self.ecg_k_start, self.ecg_k_end, t)
+            if getattr(self, "ecg_tau_rule", None) == "quantile":
+                # tau is set per-batch from pmax quantile; only schedule lam and k
+                if sched == "linear":
+                    self.ecg_lam = self._ecg_interp(self.ecg_lam_start, self.ecg_lam_end, t)
+                    self.ecg_k = self._ecg_interp(self.ecg_k_start, self.ecg_k_end, t)
+                else:
+                    self.ecg_lam = self._ecg_cosine(self.ecg_lam_start, self.ecg_lam_end, t)
+                    self.ecg_k = self._ecg_cosine(self.ecg_k_start, self.ecg_k_end, t)
             else:
-                self.ecg_lam = self._ecg_cosine(self.ecg_lam_start, self.ecg_lam_end, t)
-                self.ecg_tau = self._ecg_cosine(self.ecg_tau_start, self.ecg_tau_end, t)
-                self.ecg_k = self._ecg_cosine(self.ecg_k_start, self.ecg_k_end, t)
+                if sched == "linear":
+                    self.ecg_lam = self._ecg_interp(self.ecg_lam_start, self.ecg_lam_end, t)
+                    self.ecg_tau = self._ecg_interp(self.ecg_tau_start, self.ecg_tau_end, t)
+                    self.ecg_k = self._ecg_interp(self.ecg_k_start, self.ecg_k_end, t)
+                else:
+                    self.ecg_lam = self._ecg_cosine(self.ecg_lam_start, self.ecg_lam_end, t)
+                    self.ecg_tau = self._ecg_cosine(self.ecg_tau_start, self.ecg_tau_end, t)
+                    self.ecg_k = self._ecg_cosine(self.ecg_k_start, self.ecg_k_end, t)
 
         elif sched == "adaptive":
             st = getattr(self, "_ecg_adapt_state", None)
@@ -2982,14 +2997,25 @@ class trainModel():
             return val
     
         if self.LossInUse == LOSS_ECG:
-            loss, stats = ecg_loss(
-                y_pred, y,
-                lam=self.ecg_lam,
-                tau=self.ecg_tau,
-                k=self.ecg_k,
-                conf_type=self.ecg_conf_type,
-                detach_gates=getattr(self, "ecg_detach_gates", True)
-            )
+            if getattr(self, "ecg_tau_rule", None) == "quantile":
+                loss, stats = ecg_loss(
+                    y_pred, y,
+                    lam=self.ecg_lam,
+                    tau=self.ecg_tau,
+                    k=self.ecg_k,
+                    conf_type=self.ecg_conf_type,
+                    detach_gates=getattr(self, "ecg_detach_gates", True),
+                    tau_quantile=getattr(self, "ecg_tau_quantile", 0.8),
+                )
+            else:
+                loss, stats = ecg_loss(
+                    y_pred, y,
+                    lam=self.ecg_lam,
+                    tau=self.ecg_tau,
+                    k=self.ecg_k,
+                    conf_type=self.ecg_conf_type,
+                    detach_gates=getattr(self, "ecg_detach_gates", True),
+                )
     
             if getattr(self, "use_wandb", False):
                 # Accumulate ECG gate stats (avoid per-batch wandb spam)
@@ -5059,6 +5085,16 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
     model_cnn.ecg_k = float(ecg_k)
     model_cnn.ecg_conf_type = str(ecg_conf_type)
     model_cnn.ecg_detach_gates = bool(ecg_detach_gates)
+    # Tau quantile rule: ecg_tau_start="quantile" (or "q") + ecg_tau_end=0.8 => tau = 80%% quantile of pmax per batch
+    _tau_start, _tau_end = ecg_tau_start, ecg_tau_end
+    if _tau_start is not None and str(_tau_start).strip().lower() in ("quantile", "q"):
+        model_cnn.ecg_tau_rule = "quantile"
+        model_cnn.ecg_tau_quantile = float(_tau_end) if (_tau_end is not None and str(_tau_end).strip()) else 0.8
+        _tau_start, _tau_end = None, None
+    else:
+        model_cnn.ecg_tau_rule = getattr(model_cnn, "ecg_tau_rule", None)
+        _tau_start = float(_tau_start) if (_tau_start is not None and str(_tau_start).strip()) else None
+        _tau_end = float(_tau_end) if (_tau_end is not None and str(_tau_end).strip()) else None
     # ECG schedule (full training)
     try:
         total_epochs = int(stage1_epochs) + int(stage2_epochs)
@@ -5069,8 +5105,8 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
         total_epochs=total_epochs,
         lam_start=ecg_lam_start,
         lam_end=ecg_lam_end,
-        tau_start=ecg_tau_start,
-        tau_end=ecg_tau_end,
+        tau_start=_tau_start,
+        tau_end=_tau_end,
         k_start=ecg_k_start,
         k_end=ecg_k_end,
         adapt_warmup=ecg_adapt_warmup,
@@ -5217,8 +5253,10 @@ if __name__ == '__main__':
     parser.add_argument("--ecg_schedule", type=str, default="none", choices=["none", "linear", "cosine", "adaptive", "tau_target"])
     parser.add_argument("--ecg_lam_start", type=float, default=None)
     parser.add_argument("--ecg_lam_end", type=float, default=None)
-    parser.add_argument("--ecg_tau_start", type=float, default=None)
-    parser.add_argument("--ecg_tau_end", type=float, default=None)
+    parser.add_argument("--ecg_tau_start", type=str, default=None,
+                        help="Start tau or 'quantile'/'q' for tau=quantile(pmax). Then ecg_tau_end = quantile (e.g. 0.8).")
+    parser.add_argument("--ecg_tau_end", type=str, default=None,
+                        help="End tau, or quantile value (e.g. 0.8) when ecg_tau_start=quantile.")
     parser.add_argument("--ecg_k_start", type=float, default=None)
     parser.add_argument("--ecg_k_end", type=float, default=None)
 
@@ -5465,15 +5503,22 @@ if __name__ == "__main__":
             if args.ecg_schedule in ["linear", "cosine"]:
                 lam_s = args.ecg_lam_start if args.ecg_lam_start is not None else args.ecg_lam
                 lam_e = args.ecg_lam_end if args.ecg_lam_end is not None else args.ecg_lam
-                tau_s = args.ecg_tau_start if args.ecg_tau_start is not None else args.ecg_tau
-                tau_e = args.ecg_tau_end if args.ecg_tau_end is not None else args.ecg_tau
+                _ts = getattr(args, "ecg_tau_start", None)
+                if _ts is not None and str(_ts).strip().lower() in ("quantile", "q"):
+                    tau_part = f"tauq{args.ecg_tau_end or '0.8'}"
+                else:
+                    tau_s = _ts if _ts is not None else args.ecg_tau
+                    tau_e = args.ecg_tau_end if args.ecg_tau_end is not None else args.ecg_tau
+                    tau_part = f"tau{tau_s}-{tau_e}"
                 k_s = args.ecg_k_start if args.ecg_k_start is not None else args.ecg_k
                 k_e = args.ecg_k_end if args.ecg_k_end is not None else args.ecg_k
-                stage2Name += f"_lam{lam_s}-{lam_e}_tau{tau_s}-{tau_e}_k{k_s}-{k_e}"
+                stage2Name += f"_lam{lam_s}-{lam_e}_{tau_part}_k{k_s}-{k_e}"
             elif args.ecg_schedule == "adaptive":
                 stage2Name += f"_warm{args.ecg_adapt_warmup}_win{args.ecg_adapt_window}_baseLam{args.ecg_lam}_baseTau{args.ecg_tau}_baseK{args.ecg_k}"
         else:
-            stage2Name += f"_lam{args.ecg_lam}_tau{args.ecg_tau}_k{args.ecg_k}"
+            _ts = getattr(args, "ecg_tau_start", None)
+            tau_disp = f"tauq{args.ecg_tau_end or '0.8'}" if (_ts is not None and str(_ts).strip().lower() in ("quantile", "q")) else f"tau{args.ecg_tau}"
+            stage2Name += f"_lam{args.ecg_lam}_{tau_disp}_k{args.ecg_k}"
 
     if args.variants == "cals":
         baseName += "_cals"
@@ -5505,12 +5550,18 @@ if __name__ == "__main__":
             lam_s = getattr(args, "ecg_lam_start", None)
             tau_s = getattr(args, "ecg_tau_start", None)
             k_s = getattr(args, "ecg_k_start", None)
-            wandb.log({
-                "epoch": 0,
-                "config/ecg_lam_start": float(lam_s) if lam_s is not None else 0.0,
-                "config/ecg_tau_start": float(tau_s) if tau_s is not None else 0.0,
-                "config/ecg_k_start": float(k_s) if k_s is not None else 0.0,
-            }, step=0)
+            _tau_start_val = None
+            if tau_s is not None and str(tau_s).strip().lower() in ("quantile", "q"):
+                _tau_start_val = 0.0  # placeholder; use ecg_tau_quantile for actual
+                _tau_q = float(getattr(args, "ecg_tau_end", None) or 0.8)
+            else:
+                _tau_start_val = float(tau_s) if tau_s is not None else 0.0
+                _tau_q = None
+            to_log = {"epoch": 0, "config/ecg_lam_start": float(lam_s) if lam_s is not None else 0.0,
+                      "config/ecg_tau_start": _tau_start_val, "config/ecg_k_start": float(k_s) if k_s is not None else 0.0}
+            if _tau_q is not None:
+                to_log["config/ecg_tau_quantile"] = _tau_q
+            wandb.log(to_log, step=0)
     except Exception:
         pass
 

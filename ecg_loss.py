@@ -14,7 +14,10 @@ class ScaleGrad(torch.autograd.Function):
         return grad_output * scale, None
 
 
-def ecg_loss(logits, targets, lam=1.0, tau=0.7, k=10.0, conf_type="pmax", detach_gates=True, eps=1e-8):
+def ecg_loss(logits, targets, lam=1.0, tau=0.7, k=10.0, conf_type="pmax", detach_gates=True, eps=1e-8, tau_quantile=None):
+    """
+    tau_quantile: if set (e.g. 0.8), tau is set to this quantile of conf (pmax) per batch, reducing tau tuning.
+    """
     B, C = logits.shape
 
     p = F.softmax(logits, dim=1)
@@ -25,11 +28,15 @@ def ecg_loss(logits, targets, lam=1.0, tau=0.7, k=10.0, conf_type="pmax", detach
     # confidence
     if conf_type == "pmax":
         conf = p.max(dim=1).values
+        if tau_quantile is not None:
+            tau = torch.quantile(conf.detach(), float(tau_quantile))
         conf_gate = torch.sigmoid(k * (conf - tau))
     elif conf_type == "1-pe":
         pe = -(p * (p.clamp_min(eps)).log()).sum(dim=1)
         pe_norm = pe / math.log(C)
         conf = 1.0 - pe_norm
+        if tau_quantile is not None:
+            tau = torch.quantile(conf.detach(), float(tau_quantile))
         conf_gate = torch.sigmoid(k * (conf - tau))
     elif conf_type == "none":
         conf = torch.ones_like(py)  # dummy for logging

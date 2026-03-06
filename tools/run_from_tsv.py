@@ -23,6 +23,10 @@ Key features:
 
 - Builds the train.py command from TSV columns. Missing/empty fields are not passed.
 
+- Tau quantile rule (fewer params): set ecg_tau_start to "quantile" or "q", and ecg_tau_end to the
+  quantile in (0,1), e.g. 0.8 for 80% of pmax. Then tau is computed per batch as quantile(pmax)
+  and ecg_tau_start/ecg_tau_end schedule is not used. Reduces tuning from two tau params to one.
+
 CLI (compatible with your sbatch):
   python -u tools/run_from_tsv.py --conf <tsv> --idx <row_idx> --run_dir <dir> --commit <sha>
 """
@@ -229,7 +233,10 @@ def main() -> None:
     tau_s = (hp.get("ecg_tau_start") or "").strip()
     tau_e = (hp.get("ecg_tau_end") or "").strip()
     tau_c = (hp.get("ecg_tau") or "").strip()
-    tau_part = f"{tau_s}-{tau_e}" if (tau_s and tau_e) else (tau_c if tau_c else "na")
+    if tau_s and tau_s.lower() in ("quantile", "q"):
+        tau_part = f"q{tau_e}" if tau_e else "q0.8"
+    else:
+        tau_part = f"{tau_s}-{tau_e}" if (tau_s and tau_e) else (tau_c if tau_c else "na")
 
     k_s = (hp.get("ecg_k_start") or "").strip()
     k_e = (hp.get("ecg_k_end") or "").strip()
