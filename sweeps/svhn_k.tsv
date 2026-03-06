@@ -1,0 +1,10 @@
+#wandb_project=ecg-svhn-pmax
+dataset	seed	stop	stop_val	lr	momentum	batch	workers	half_prec	variants	type	pe_mode	stage1_epochs	stage2_epochs	loss_stage1	loss_stage2	ecg_conf_type	ecg_detach_gates	ecg_schedule	ecg_lam_start	ecg_lam_end	ecg_tau_start	ecg_tau_end	ecg_k_start	ecg_k_end	force_run	method_name	run_kind
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.05	0.20	0.77	0.99	4	4	True	svhn_kConst4_lam05_20_tau77_99	best_k_sweep
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.05	0.20	0.77	0.99	6	6	True	svhn_kConst6_lam05_20_tau77_99	best_k_sweep
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.05	0.20	0.77	0.99	8	8	True	svhn_kConst8_lam05_20_tau77_99	best_k_sweep
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.05	0.20	0.77	0.99	10	10	True	svhn_kConst10_lam05_20_tau77_99	best_k_sweep
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.05	0.20	0.77	0.99	12	12	True	svhn_kConst12_lam05_20_tau77_99	best_k_sweep
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.05	0.20	0.77	0.99	14	14	True	svhn_kConst14_lam05_20_tau77_99	best_k_sweep
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.05	0.20	0.77	0.99	16	16	True	svhn_kConst16_lam05_20_tau77_99	best_k_sweep
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.05	0.20	0.77	0.99	20	20	True	svhn_kConst20_lam05_20_tau77_99	best_k_sweep
