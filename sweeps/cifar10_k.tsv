@@ -1,0 +1,9 @@
+# k-sweep around your best config (pmax + linear + lam0.40->0.055 + tau0.60)
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	pmax	True	linear	0.40	0.60	4	0.40	0.055	0.60	0.60	4	4					ECG_k4_lam0.40to0.055_tau0.60	r2
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	pmax	True	linear	0.40	0.60	5	0.40	0.055	0.60	0.60	5	5					ECG_k5_lam0.40to0.055_tau0.60	r2
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	pmax	True	linear	0.40	0.60	6	0.40	0.055	0.60	0.60	6	6					ECG_k6_lam0.40to0.055_tau0.60	r2
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	pmax	True	linear	0.40	0.60	7	0.40	0.055	0.60	0.60	7	7					ECG_k7_lam0.40to0.055_tau0.60	r2
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	pmax	True	linear	0.40	0.60	8	0.40	0.055	0.60	0.60	8	8					ECG_k8_lam0.40to0.055_tau0.60	r2
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	pmax	True	linear	0.40	0.60	10	0.40	0.055	0.60	0.60	10	10					ECG_k10_lam0.40to0.055_tau0.60	r2
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	pmax	True	linear	0.40	0.60	12	0.40	0.055	0.60	0.60	12	12					ECG_k12_lam0.40to0.055_tau0.60	r2
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	pmax	True	linear	0.40	0.60	16	0.40	0.055	0.60	0.60	16	16					ECG_k16_lam0.40to0.055_tau0.60	r2
