@@ -14,9 +14,10 @@ class ScaleGrad(torch.autograd.Function):
         return grad_output * scale, None
 
 
-def ecg_loss(logits, targets, lam=1.0, tau=0.7, k=10.0, conf_type="pmax", detach_gates=True, eps=1e-8, tau_quantile=None):
+def ecg_loss(logits, targets, lam=1.0, tau=0.7, k=10.0, conf_type="pmax", detach_gates=True, eps=1e-8, tau_quantile=None, scale_normalize=False):
     """
     tau_quantile: if set (e.g. 0.8), tau is set to this quantile of conf (pmax) per batch, reducing tau tuning.
+    scale_normalize: if True, scale is normalized so mean(scale)=1 (for auto-lambda; keeps global step size unchanged).
     """
     B, C = logits.shape
 
@@ -52,13 +53,17 @@ def ecg_loss(logits, targets, lam=1.0, tau=0.7, k=10.0, conf_type="pmax", detach
 
     gate = wrong_gate * conf_gate
     scale = (1.0 + lam * gate).view(-1, 1)
+    if scale_normalize:
+        scale = scale / (scale.mean().detach().clamp_min(1e-8))
 
     scaled_logits = ScaleGrad.apply(logits, scale)
 
     loss = F.cross_entropy(scaled_logits, targets)
 
+    # gate_mean from detached gate (for auto-lambda EMA; avoid graph retention)
+    gate_mean_val = gate.detach().mean().item()
     stats = {
-        "gate_mean": gate.mean().item(),
+        "gate_mean": gate_mean_val,
         "wrong_mean": wrong_gate.mean().item(),
         "conf_mean": conf.mean().item(),
         "conf_gate_mean": conf_gate.mean().item(),
@@ -66,6 +71,8 @@ def ecg_loss(logits, targets, lam=1.0, tau=0.7, k=10.0, conf_type="pmax", detach
         "scale_mean": scale.mean().item(),
         "ce_mean": ce.mean().item(),
     }
+    if scale_normalize:
+        stats["scale_std_after_norm"] = scale.detach().std().item() if scale.numel() > 1 else 0.0
 
     return loss, stats
 

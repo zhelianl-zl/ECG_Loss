@@ -1314,6 +1314,9 @@ class trainModel():
           - cosine: cosine anneal start->end over [1..total_epochs]
           - adaptive: adjust params online based on recent error trend
           - tau_target: adjust tau online to keep gate active fraction near a target (Scheme C)
+
+        When ecg_lam_rule == "auto": lam is only from gate_ema and delta (no schedule).
+        ecg_lam_start/ecg_lam_end are not used for lam; ecg_lam_end in TSV is delta.
         """
         self.ecg_schedule = (schedule or "none").lower()
         self.ecg_total_epochs = int(total_epochs) if total_epochs is not None else None
@@ -1331,9 +1334,13 @@ class trainModel():
         self.ecg_tau_base = float(getattr(self, "ecg_tau", 0.7))
         self.ecg_k_base = float(getattr(self, "ecg_k", 10.0))
 
-        # Start/end defaults (if not provided, keep constant)
-        self.ecg_lam_start = self.ecg_lam_base if lam_start is None else float(lam_start)
-        self.ecg_lam_end = self.ecg_lam_base if lam_end is None else float(lam_end)
+        # Start/end defaults (if not provided, keep constant). Auto-lambda: lam set per-batch from gate_ema
+        if getattr(self, "ecg_lam_rule", None) == "auto":
+            self.ecg_lam_start = None
+            self.ecg_lam_end = None
+        else:
+            self.ecg_lam_start = self.ecg_lam_base if lam_start is None else float(lam_start)
+            self.ecg_lam_end = self.ecg_lam_base if lam_end is None else float(lam_end)
 
         # tau: support "quantile" rule (tau = quantile of pmax per batch) via tau_rule/tau_quantile
         if getattr(self, "ecg_tau_rule", None) == "quantile":
@@ -1359,7 +1366,8 @@ class trainModel():
 
         # Initialize visible params for scheduled modes
         if self.ecg_schedule in ("linear", "cosine"):
-            self.ecg_lam = float(self.ecg_lam_start)
+            if getattr(self, "ecg_lam_rule", None) != "auto" and self.ecg_lam_start is not None:
+                self.ecg_lam = float(self.ecg_lam_start)
             if getattr(self, "ecg_tau_rule", None) != "quantile":
                 self.ecg_tau = float(self.ecg_tau_start) if self.ecg_tau_start is not None else self.ecg_tau_base
             self.ecg_k = float(self.ecg_k_start)
@@ -1574,8 +1582,26 @@ class trainModel():
 
         if sched in ("linear", "cosine"):
             t = self._ecg_schedule_progress(global_epoch)
-            if getattr(self, "ecg_tau_rule", None) == "quantile":
-                # tau is set per-batch from pmax quantile; only schedule lam and k
+            lam_auto = getattr(self, "ecg_lam_rule", None) == "auto"
+            tau_quantile = getattr(self, "ecg_tau_rule", None) == "quantile"
+            if lam_auto and tau_quantile:
+                # both auto: only schedule k
+                if sched == "linear":
+                    self.ecg_k = self._ecg_interp(self.ecg_k_start, self.ecg_k_end, t)
+                else:
+                    self.ecg_k = self._ecg_cosine(self.ecg_k_start, self.ecg_k_end, t)
+            elif lam_auto:
+                # lam auto; schedule tau and k
+                if sched == "linear":
+                    if not tau_quantile:
+                        self.ecg_tau = self._ecg_interp(self.ecg_tau_start, self.ecg_tau_end, t)
+                    self.ecg_k = self._ecg_interp(self.ecg_k_start, self.ecg_k_end, t)
+                else:
+                    if not tau_quantile:
+                        self.ecg_tau = self._ecg_cosine(self.ecg_tau_start, self.ecg_tau_end, t)
+                    self.ecg_k = self._ecg_cosine(self.ecg_k_start, self.ecg_k_end, t)
+            elif tau_quantile:
+                # tau quantile; schedule lam and k
                 if sched == "linear":
                     self.ecg_lam = self._ecg_interp(self.ecg_lam_start, self.ecg_lam_end, t)
                     self.ecg_k = self._ecg_interp(self.ecg_k_start, self.ecg_k_end, t)
@@ -1595,7 +1621,8 @@ class trainModel():
         elif sched == "adaptive":
             st = getattr(self, "_ecg_adapt_state", None)
             if st is not None:
-                self.ecg_lam = float(st["lam"])
+                if getattr(self, "ecg_lam_rule", None) != "auto":
+                    self.ecg_lam = float(st["lam"])
                 self.ecg_tau = float(st["tau"])
                 self.ecg_k = float(st["k"])
 
@@ -1604,8 +1631,8 @@ class trainModel():
             # But we still want lam/k to follow a smooth schedule (if start/end are provided)
             # and to be correctly applied from epoch 1.
             t = self._ecg_schedule_progress(global_epoch)
-            # lam schedule (fall back to fixed lam if start/end not present)
-            if hasattr(self, "ecg_lam_start") and hasattr(self, "ecg_lam_end"):
+            # lam schedule (skip when auto-lambda)
+            if getattr(self, "ecg_lam_rule", None) != "auto" and getattr(self, "ecg_lam_start", None) is not None and getattr(self, "ecg_lam_end", None) is not None:
                 self.ecg_lam = self._ecg_interp(self.ecg_lam_start, self.ecg_lam_end, t)
             # k schedule
             if hasattr(self, "ecg_k_start") and hasattr(self, "ecg_k_end"):
@@ -1615,17 +1642,18 @@ class trainModel():
         # Log current schedule values once per epoch (if wandb active)
         try:
             if wandb.run is not None:
-                wandb.log(
-                    {
-                        "epoch": int(global_epoch),
-                        "ECG/lam": float(getattr(self, "ecg_lam", 0.0)),
-                        "ECG/tau": float(getattr(self, "ecg_tau", 0.0)),
-                        "ECG/k": float(getattr(self, "ecg_k", 0.0)),
-                        "ECG/schedule_progress": float(self._ecg_schedule_progress(global_epoch)),
-                        "ECG/schedule": str(sched),
-                    },
-                    step=int(global_epoch),
-                )
+                to_log = {
+                    "epoch": int(global_epoch),
+                    "ECG/lam": float(getattr(self, "ecg_lam", 0.0)),
+                    "ECG/tau": float(getattr(self, "ecg_tau", 0.0)),
+                    "ECG/k": float(getattr(self, "ecg_k", 0.0)),
+                    "ECG/schedule_progress": float(self._ecg_schedule_progress(global_epoch)),
+                    "ECG/schedule": str(sched),
+                }
+                if getattr(self, "ecg_lam_rule", None) == "auto":
+                    to_log["ECG/gate_ema"] = float(getattr(self, "_ecg_gate_ema", 0.0))
+                    to_log["ECG/lam_auto"] = float(getattr(self, "ecg_lam", 0.0))
+                wandb.log(to_log, step=int(global_epoch))
         except Exception:
             pass
 
@@ -1709,13 +1737,14 @@ class trainModel():
                 pass
             
             # Also allow lam/k to follow the configured start->end schedule while tau is controlled.
+            # Auto-lam: lam is only from gate_ema + delta; do not overwrite with schedule.
             try:
                 if getattr(self, "ecg_total_epochs", None) is not None:
                     t = self._ecg_schedule_progress(int(global_epoch))
-                    # linear interpolate lam and k if start/end provided (or base values)
-                    lam_new = (1.0 - t) * float(getattr(self, "ecg_lam_start", getattr(self, "ecg_lam", 0.0))) + t * float(getattr(self, "ecg_lam_end", getattr(self, "ecg_lam", 0.0)))
+                    if getattr(self, "ecg_lam_rule", None) != "auto":
+                        lam_new = (1.0 - t) * float(getattr(self, "ecg_lam_start", getattr(self, "ecg_lam", 0.0))) + t * float(getattr(self, "ecg_lam_end", getattr(self, "ecg_lam", 0.0)))
+                        self.ecg_lam = float(lam_new)
                     k_new   = (1.0 - t) * float(getattr(self, "ecg_k_start", getattr(self, "ecg_k", 0.0)))   + t * float(getattr(self, "ecg_k_end", getattr(self, "ecg_k", 0.0)))
-                    self.ecg_lam = float(lam_new)
                     self.ecg_k = float(k_new)
                     # log
                     try:
@@ -2997,26 +3026,56 @@ class trainModel():
             return val
     
         if self.LossInUse == LOSS_ECG:
+            # Auto-lambda: lam is only from gate_ema and delta (no schedule). Only update gate_ema when training.
+            use_lam_auto = getattr(self, "ecg_lam_rule", None) == "auto"
+            if use_lam_auto:
+                gate_ema = getattr(self, "_ecg_gate_ema", None)
+                delta = getattr(self, "ecg_lam_delta", 0.05)
+                eps = getattr(self, "ecg_lam_eps", 1e-6)
+                lam_max = getattr(self, "ecg_lam_max", 2.0)
+                if gate_ema is None:
+                    lam_cur = lam_max
+                else:
+                    lam_cur = min(lam_max, max(0.0, delta / (gate_ema + eps)))
+            else:
+                lam_cur = self.ecg_lam
             if getattr(self, "ecg_tau_rule", None) == "quantile":
                 loss, stats = ecg_loss(
                     y_pred, y,
-                    lam=self.ecg_lam,
+                    lam=lam_cur,
                     tau=self.ecg_tau,
                     k=self.ecg_k,
                     conf_type=self.ecg_conf_type,
                     detach_gates=getattr(self, "ecg_detach_gates", True),
                     tau_quantile=getattr(self, "ecg_tau_quantile", 0.8),
+                    scale_normalize=use_lam_auto,
                 )
             else:
                 loss, stats = ecg_loss(
                     y_pred, y,
-                    lam=self.ecg_lam,
+                    lam=lam_cur,
                     tau=self.ecg_tau,
                     k=self.ecg_k,
                     conf_type=self.ecg_conf_type,
                     detach_gates=getattr(self, "ecg_detach_gates", True),
+                    scale_normalize=use_lam_auto,
                 )
-    
+            # Auto-lambda: only update gate_ema in training (avoid drift in eval/val); optional DDP sync
+            if use_lam_auto and model.training:
+                gate_mean = stats.get("gate_mean", 0.0)
+                try:
+                    if torch.distributed.is_initialized():
+                        t = torch.tensor([gate_mean], dtype=torch.float32, device=y_pred.device)
+                        torch.distributed.all_reduce(t, op=torch.distributed.ReduceOp.AVG)
+                        gate_mean = t.item()
+                except Exception:
+                    pass
+                beta = getattr(self, "ecg_lam_beta", 0.9)
+                if getattr(self, "_ecg_gate_ema", None) is None:
+                    self._ecg_gate_ema = gate_mean
+                else:
+                    self._ecg_gate_ema = beta * self._ecg_gate_ema + (1.0 - beta) * gate_mean
+                self.ecg_lam = lam_cur  # for epoch-level wandb log
             if getattr(self, "use_wandb", False):
                 # Accumulate ECG gate stats (avoid per-batch wandb spam)
                 try:
@@ -5074,7 +5133,8 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
          eval_extra_every=0, eval_adv_suite=False, adv_attacks='fgsm,pgd_linf,pgd_linf_rs',
          adv_eps=8, adv_steps=20, adv_restarts=1, adv_pixel=True,
          eval_c_suite=False, c_corruptions='gaussian_noise,brightness', c_severities=5,
-         imbalance='none', imb_factor=None, imb_seed=None):
+         imbalance='none', imb_factor=None, imb_seed=None,
+         ecg_lam_max=2.0, ecg_lam_beta=0.9, ecg_lam_eps=1e-6):
     
     dataset_loader = dataset(dataset_name=dataset_name, batch_size=batch, batch_size_adv=batch_adv,
                              imbalance=imbalance, imb_factor=imb_factor, imb_seed=imb_seed)
@@ -5085,6 +5145,20 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
     model_cnn.ecg_k = float(ecg_k)
     model_cnn.ecg_conf_type = str(ecg_conf_type)
     model_cnn.ecg_detach_gates = bool(ecg_detach_gates)
+    # Auto-lambda: ecg_lam_start="auto" + ecg_lam_end=delta (e.g. 0.05) => lam = delta/(gate_ema+eps), scale normalized to mean 1
+    _lam_start, _lam_end = ecg_lam_start, ecg_lam_end
+    if _lam_start is not None and str(_lam_start).strip().lower() == "auto":
+        model_cnn.ecg_lam_rule = "auto"
+        model_cnn.ecg_lam_delta = float(_lam_end) if (_lam_end is not None and str(_lam_end).strip()) else 0.05
+        model_cnn.ecg_lam_max = float(ecg_lam_max)
+        model_cnn.ecg_lam_beta = float(ecg_lam_beta)
+        model_cnn.ecg_lam_eps = float(ecg_lam_eps)
+        model_cnn._ecg_gate_ema = None
+        _lam_start, _lam_end = None, None
+    else:
+        model_cnn.ecg_lam_rule = getattr(model_cnn, "ecg_lam_rule", None)
+        _lam_start = float(_lam_start) if (_lam_start is not None and str(_lam_start).strip()) else None
+        _lam_end = float(_lam_end) if (_lam_end is not None and str(_lam_end).strip()) else None
     # Tau quantile rule: ecg_tau_start="quantile" (or "q") + ecg_tau_end=0.8 => tau = 80%% quantile of pmax per batch
     _tau_start, _tau_end = ecg_tau_start, ecg_tau_end
     if _tau_start is not None and str(_tau_start).strip().lower() in ("quantile", "q"):
@@ -5103,8 +5177,8 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
     model_cnn.configure_ecg_schedule(
         schedule=ecg_schedule,
         total_epochs=total_epochs,
-        lam_start=ecg_lam_start,
-        lam_end=ecg_lam_end,
+        lam_start=_lam_start,
+        lam_end=_lam_end,
         tau_start=_tau_start,
         tau_end=_tau_end,
         k_start=ecg_k_start,
@@ -5251,8 +5325,13 @@ if __name__ == '__main__':
     parser.add_argument("--ecg_conf_type", type=str, default="pmax", choices=["pmax", "1-pe", "none"])
     parser.add_argument("--ecg_detach_gates", type=str2bool, default=True)
     parser.add_argument("--ecg_schedule", type=str, default="none", choices=["none", "linear", "cosine", "adaptive", "tau_target"])
-    parser.add_argument("--ecg_lam_start", type=float, default=None)
-    parser.add_argument("--ecg_lam_end", type=float, default=None)
+    parser.add_argument("--ecg_lam_start", type=str, default=None,
+                        help="Start lam or 'auto' for auto-lambda (then ecg_lam_end=delta, e.g. 0.05).")
+    parser.add_argument("--ecg_lam_end", type=str, default=None,
+                        help="End lam, or delta (target pre-norm strength) when ecg_lam_start=auto.")
+    parser.add_argument("--ecg_lam_max", type=float, default=2.0, help="Max lam when using auto-lambda.")
+    parser.add_argument("--ecg_lam_beta", type=float, default=0.9, help="EMA beta for gate_mean in auto-lambda.")
+    parser.add_argument("--ecg_lam_eps", type=float, default=1e-6, help="Eps in lam = delta/(gate_ema+eps) for auto-lambda.")
     parser.add_argument("--ecg_tau_start", type=str, default=None,
                         help="Start tau or 'quantile'/'q' for tau=quantile(pmax). Then ecg_tau_end = quantile (e.g. 0.8).")
     parser.add_argument("--ecg_tau_end", type=str, default=None,
@@ -5501,8 +5580,13 @@ if __name__ == "__main__":
         if args.ecg_schedule != "none":
             stage2Name += f"_sched{args.ecg_schedule}"
             if args.ecg_schedule in ["linear", "cosine"]:
-                lam_s = args.ecg_lam_start if args.ecg_lam_start is not None else args.ecg_lam
-                lam_e = args.ecg_lam_end if args.ecg_lam_end is not None else args.ecg_lam
+                _ls = getattr(args, "ecg_lam_start", None)
+                if _ls is not None and str(_ls).strip().lower() == "auto":
+                    lam_part = f"lam_auto{args.ecg_lam_end or '0.05'}"
+                else:
+                    lam_s = _ls if _ls is not None else args.ecg_lam
+                    lam_e = args.ecg_lam_end if args.ecg_lam_end is not None else args.ecg_lam
+                    lam_part = f"lam{lam_s}-{lam_e}"
                 _ts = getattr(args, "ecg_tau_start", None)
                 if _ts is not None and str(_ts).strip().lower() in ("quantile", "q"):
                     tau_part = f"tauq{args.ecg_tau_end or '0.8'}"
@@ -5512,13 +5596,15 @@ if __name__ == "__main__":
                     tau_part = f"tau{tau_s}-{tau_e}"
                 k_s = args.ecg_k_start if args.ecg_k_start is not None else args.ecg_k
                 k_e = args.ecg_k_end if args.ecg_k_end is not None else args.ecg_k
-                stage2Name += f"_lam{lam_s}-{lam_e}_{tau_part}_k{k_s}-{k_e}"
+                stage2Name += f"_{lam_part}_{tau_part}_k{k_s}-{k_e}"
             elif args.ecg_schedule == "adaptive":
                 stage2Name += f"_warm{args.ecg_adapt_warmup}_win{args.ecg_adapt_window}_baseLam{args.ecg_lam}_baseTau{args.ecg_tau}_baseK{args.ecg_k}"
         else:
+            _ls = getattr(args, "ecg_lam_start", None)
+            lam_disp = f"lam_auto{args.ecg_lam_end or '0.05'}" if (_ls is not None and str(_ls).strip().lower() == "auto") else f"lam{args.ecg_lam}"
             _ts = getattr(args, "ecg_tau_start", None)
             tau_disp = f"tauq{args.ecg_tau_end or '0.8'}" if (_ts is not None and str(_ts).strip().lower() in ("quantile", "q")) else f"tau{args.ecg_tau}"
-            stage2Name += f"_lam{args.ecg_lam}_{tau_disp}_k{args.ecg_k}"
+            stage2Name += f"_{lam_disp}_{tau_disp}_k{args.ecg_k}"
 
     if args.variants == "cals":
         baseName += "_cals"
@@ -5550,6 +5636,12 @@ if __name__ == "__main__":
             lam_s = getattr(args, "ecg_lam_start", None)
             tau_s = getattr(args, "ecg_tau_start", None)
             k_s = getattr(args, "ecg_k_start", None)
+            _lam_start_val = 0.0
+            _lam_delta = None
+            if lam_s is not None and str(lam_s).strip().lower() == "auto":
+                _lam_delta = float(getattr(args, "ecg_lam_end", None) or 0.05)
+            else:
+                _lam_start_val = float(lam_s) if lam_s is not None else 0.0
             _tau_start_val = None
             if tau_s is not None and str(tau_s).strip().lower() in ("quantile", "q"):
                 _tau_start_val = 0.0  # placeholder; use ecg_tau_quantile for actual
@@ -5557,8 +5649,10 @@ if __name__ == "__main__":
             else:
                 _tau_start_val = float(tau_s) if tau_s is not None else 0.0
                 _tau_q = None
-            to_log = {"epoch": 0, "config/ecg_lam_start": float(lam_s) if lam_s is not None else 0.0,
+            to_log = {"epoch": 0, "config/ecg_lam_start": _lam_start_val,
                       "config/ecg_tau_start": _tau_start_val, "config/ecg_k_start": float(k_s) if k_s is not None else 0.0}
+            if _lam_delta is not None:
+                to_log["config/ecg_lam_delta"] = _lam_delta
             if _tau_q is not None:
                 to_log["config/ecg_tau_quantile"] = _tau_q
             wandb.log(to_log, step=0)
@@ -5584,4 +5678,5 @@ if __name__ == "__main__":
         getattr(args, "eval_c_suite", False), getattr(args, "c_corruptions", "gaussian_noise,brightness"),
         getattr(args, "c_severities", 5), getattr(args, "imbalance", "none"), getattr(args, "imb_factor", None),
         getattr(args, "imb_seed", None),
+        getattr(args, "ecg_lam_max", 2.0), getattr(args, "ecg_lam_beta", 0.9), getattr(args, "ecg_lam_eps", 1e-6),
     )

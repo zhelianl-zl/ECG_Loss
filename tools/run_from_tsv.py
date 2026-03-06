@@ -27,6 +27,10 @@ Key features:
   quantile in (0,1), e.g. 0.8 for 80% of pmax. Then tau is computed per batch as quantile(pmax)
   and ecg_tau_start/ecg_tau_end schedule is not used. Reduces tuning from two tau params to one.
 
+- Auto-lambda: set ecg_lam_start to "auto" and ecg_lam_end to delta (e.g. 0.05). Then lam is set
+  per batch so mean(1+lam*g) ≈ 1+delta; scale is normalized to mean 1. Reduces lam tuning; try
+  delta=0.1 if gate activation is too weak (e.g. on CIFAR-10/SVHN).
+
 CLI (compatible with your sbatch):
   python -u tools/run_from_tsv.py --conf <tsv> --idx <row_idx> --run_dir <dir> --commit <sha>
 """
@@ -228,7 +232,10 @@ def main() -> None:
     lam_s = (hp.get("ecg_lam_start") or "").strip()
     lam_e = (hp.get("ecg_lam_end") or "").strip()
     lam_c = (hp.get("ecg_lam") or "").strip()
-    lam_part = f"{lam_s}-{lam_e}" if (lam_s and lam_e) else (lam_c if lam_c else "na")
+    if lam_s and lam_s.lower() == "auto":
+        lam_part = f"auto{lam_e}" if lam_e else "auto0.05"
+    else:
+        lam_part = f"{lam_s}-{lam_e}" if (lam_s and lam_e) else (lam_c if lam_c else "na")
 
     tau_s = (hp.get("ecg_tau_start") or "").strip()
     tau_e = (hp.get("ecg_tau_end") or "").strip()
@@ -383,6 +390,10 @@ def main() -> None:
     _add_arg(cmd, "--ecg_tau_ema", hp, "ecg_tau_ema")
     _add_arg(cmd, "--ecg_tau_deadzone", hp, "ecg_tau_deadzone")
 
+    # auto-lambda (optional overrides when ecg_lam_start=auto)
+    _add_arg(cmd, "--ecg_lam_max", hp, "ecg_lam_max")
+    _add_arg(cmd, "--ecg_lam_beta", hp, "ecg_lam_beta")
+    _add_arg(cmd, "--ecg_lam_eps", hp, "ecg_lam_eps")
 
     # ---- suites / long-tail / demo dump (optional) ----
     _add_arg(cmd, "--eval_extra_every", hp, "eval_extra_every")
