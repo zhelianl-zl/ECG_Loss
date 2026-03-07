@@ -27,9 +27,9 @@ Key features:
   quantile in (0,1), e.g. 0.8 for 80% of pmax. Then tau is computed per batch as quantile(pmax)
   and ecg_tau_start/ecg_tau_end schedule is not used. Reduces tuning from two tau params to one.
 
-- Auto-lambda: set ecg_lam_start to "auto" and ecg_lam_end to delta (e.g. 0.05). Then lam is set
-  per batch so mean(1+lam*g) ≈ 1+delta; scale is normalized to mean 1. Reduces lam tuning; try
-  delta=0.1 if gate activation is too weak (e.g. on CIFAR-10/SVHN).
+- Auto-lambda: set ecg_lam_start to "auto" (or "auto_w" for 5-epoch delta warmup) and ecg_lam_end
+  to delta (e.g. 0.05). Then lam is set per batch so mean(1+lam*g) ≈ 1+delta; scale normalized
+  to mean 1. auto_w: delta_eff = delta * min(1, epoch/5) for first 5 epochs.
 
 CLI (compatible with your sbatch):
   python -u tools/run_from_tsv.py --conf <tsv> --idx <row_idx> --run_dir <dir> --commit <sha>
@@ -232,8 +232,8 @@ def main() -> None:
     lam_s = (hp.get("ecg_lam_start") or "").strip()
     lam_e = (hp.get("ecg_lam_end") or "").strip()
     lam_c = (hp.get("ecg_lam") or "").strip()
-    if lam_s and lam_s.lower() == "auto":
-        lam_part = f"auto{lam_e}" if lam_e else "auto0.05"
+    if lam_s and lam_s.lower() in ("auto", "auto_w"):
+        lam_part = f"{lam_s.lower()}{lam_e}" if lam_e else (lam_s.lower() + "0.05")
     else:
         lam_part = f"{lam_s}-{lam_e}" if (lam_s and lam_e) else (lam_c if lam_c else "na")
 
