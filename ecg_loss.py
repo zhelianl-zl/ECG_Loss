@@ -73,6 +73,14 @@ def ecg_loss(logits, targets, lam=1.0, tau=0.7, k=10.0, conf_type="pmax", detach
     }
     if scale_normalize:
         stats["scale_std_after_norm"] = scale.detach().std().item() if scale.numel() > 1 else 0.0
+        # Tail strength for diagnosing auto-lambda (logging only; no graph)
+        s_flat = scale.detach().float().view(-1)
+        if s_flat.numel() == 0:
+            stats["scale_p99_after_norm"] = 0.0
+        elif s_flat.numel() == 1:
+            stats["scale_p99_after_norm"] = s_flat.item()
+        else:
+            stats["scale_p99_after_norm"] = torch.quantile(s_flat, 0.99).item()
 
     return loss, stats
 
