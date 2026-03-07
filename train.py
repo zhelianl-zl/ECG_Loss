@@ -3032,7 +3032,7 @@ class trainModel():
                 gate_ema = getattr(self, "_ecg_gate_ema", None)
                 delta = getattr(self, "ecg_lam_delta", 0.05)
                 eps = getattr(self, "ecg_lam_eps", 1e-6)
-                lam_max = getattr(self, "ecg_lam_max", 2.0)
+                lam_max = getattr(self, "ecg_lam_max", 1.5)
                 if gate_ema is None:
                     lam_cur = lam_max
                 else:
@@ -5134,7 +5134,7 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
          adv_eps=8, adv_steps=20, adv_restarts=1, adv_pixel=True,
          eval_c_suite=False, c_corruptions='gaussian_noise,brightness', c_severities=5,
          imbalance='none', imb_factor=None, imb_seed=None,
-         ecg_lam_max=2.0, ecg_lam_beta=0.9, ecg_lam_eps=1e-6):
+         ecg_lam_max=1.5, ecg_lam_beta=0.9, ecg_lam_eps=1e-6):
     
     dataset_loader = dataset(dataset_name=dataset_name, batch_size=batch, batch_size_adv=batch_adv,
                              imbalance=imbalance, imb_factor=imb_factor, imb_seed=imb_seed)
@@ -5329,7 +5329,7 @@ if __name__ == '__main__':
                         help="Start lam or 'auto' for auto-lambda (then ecg_lam_end=delta, e.g. 0.05).")
     parser.add_argument("--ecg_lam_end", type=str, default=None,
                         help="End lam, or delta (target pre-norm strength) when ecg_lam_start=auto.")
-    parser.add_argument("--ecg_lam_max", type=float, default=2.0, help="Max lam when using auto-lambda.")
+    parser.add_argument("--ecg_lam_max", type=float, default=1.5, help="Max lam when using auto-lambda.")
     parser.add_argument("--ecg_lam_beta", type=float, default=0.9, help="EMA beta for gate_mean in auto-lambda.")
     parser.add_argument("--ecg_lam_eps", type=float, default=1e-6, help="Eps in lam = delta/(gate_ema+eps) for auto-lambda.")
     parser.add_argument("--ecg_tau_start", type=str, default=None,
@@ -5678,5 +5678,5 @@ if __name__ == "__main__":
         getattr(args, "eval_c_suite", False), getattr(args, "c_corruptions", "gaussian_noise,brightness"),
         getattr(args, "c_severities", 5), getattr(args, "imbalance", "none"), getattr(args, "imb_factor", None),
         getattr(args, "imb_seed", None),
-        getattr(args, "ecg_lam_max", 2.0), getattr(args, "ecg_lam_beta", 0.9), getattr(args, "ecg_lam_eps", 1e-6),
+        getattr(args, "ecg_lam_max", 1.5), getattr(args, "ecg_lam_beta", 0.9), getattr(args, "ecg_lam_eps", 1e-6),
     )
