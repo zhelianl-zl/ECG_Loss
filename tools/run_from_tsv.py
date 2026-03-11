@@ -310,7 +310,8 @@ def main() -> None:
 
     
     # per-row env overrides: any TSV column named env_<VARNAME> will set environment variable <VARNAME>
-    # Example columns: env_IMAGENET_ORIGINAL, env_IMAGENET_RES, env_IMAGENET_DS_ROOT, env_DL_WORKERS
+    # Example columns: env_IMAGENET_ORIGINAL, env_IMAGENET_RES, env_IMAGENET_DS_ROOT, env_DL_WORKERS.
+    # For 224x224 (e.g. PSC): env_IMAGENET_ORIGINAL=1, env_IMAGENET_ROOT=/path/to/dir/with/train/and/val
     for k, v in hp.items():
         if not k.startswith("env_"):
             continue
