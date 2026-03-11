@@ -319,10 +319,12 @@ def main() -> None:
             continue
         os.environ[k[len("env_"):]] = vv
 
-    # ImageNet: always 32x32. Set env so train.py finds SmallImageNet (even if sbatch did not).
+    # ImageNet: defaults for 32x32 SmallImageNet; TSV can override via env_IMAGENET_* (e.g. 64x64).
     if dataset.lower() == "imagenet":
-        os.environ["IMAGENET_ORIGINAL"] = "0"
-        os.environ["IMAGENET_RES"] = "32"
+        if not os.environ.get("IMAGENET_ORIGINAL", "").strip():
+            os.environ["IMAGENET_ORIGINAL"] = "0"
+        if not os.environ.get("IMAGENET_RES", "").strip():
+            os.environ["IMAGENET_RES"] = "32"
         if not os.environ.get("IMAGENET_DS_ROOT", "").strip():
             data_root_for_ds = Path(os.environ.get("CEGS_DATA_DIR", str(run_dir / "data"))).expanduser().resolve()
             default_32 = data_root_for_ds / "smallimagenet_32"
