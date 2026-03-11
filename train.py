@@ -45,6 +45,19 @@ import argparse, copy
 import pickle, time, random
 from PIL import Image
 import numpy as np
+
+# DataLoader reproducibility: workers read seed from env (set in main() before creating dataset)
+def _seed_worker(worker_id):
+    """Seed each DataLoader worker so transforms (e.g. RandomHorizontalFlip) are reproducible across runs."""
+    seed_val = os.environ.get("TRAIN_DATALOADER_SEED", "")
+    if not seed_val:
+        return
+    try:
+        base = int(seed_val)
+        np.random.seed(base + worker_id)
+        random.seed(base + worker_id)
+    except ValueError:
+        pass
 import wandb
 import math
 from collections import deque
@@ -922,11 +935,12 @@ class DEUP():
 
 
 class dataset():
-    def __init__(self, dataset_name="mnist", batch_size = 100,  batch_size_adv = 100, imbalance="none", imb_factor=None, imb_seed=None):
+    def __init__(self, dataset_name="mnist", batch_size = 100,  batch_size_adv = 100, imbalance="none", imb_factor=None, imb_seed=None, seed=None):
         batch_size_test = 32
         # the shuffle needs to be false for the DataLoader to more easily store the IDs of wrong classified inputs 
         self.batch_size = batch_size
         self.batch_size_adv = batch_size_adv
+        self._dl_seed = seed  # for reproducible DataLoader shuffle + worker RNG (ImageNet etc.)
         
         if dataset_name == "mnist":
             self.num_classes = 10
@@ -1160,9 +1174,16 @@ class dataset():
             )
             if DL_WORKERS > 0:
                 DL_KW["prefetch_factor"] = 2
+            # Reproducibility: same seed => same batch order and same worker RNG (augmentations) across runs
+            def _dl_kw_repro(offset=0):
+                if self._dl_seed is None:
+                    return DL_KW
+                g = torch.Generator()
+                g.manual_seed(self._dl_seed + offset)
+                return {**DL_KW, "generator": g, "worker_init_fn": _seed_worker}
 
-            self.train_loader = DataLoader(self.data_train, batch_size=batch_size, shuffle=True, **DL_KW) if batch_size > 0 else None
-            self.trainAvd_loader = DataLoader(self.data_train, batch_size=batch_size_adv, shuffle=True, **DL_KW) if batch_size_adv > 0 else None
+            self.train_loader = DataLoader(self.data_train, batch_size=batch_size, shuffle=True, **_dl_kw_repro(0)) if batch_size > 0 else None
+            self.trainAvd_loader = DataLoader(self.data_train, batch_size=batch_size_adv, shuffle=True, **_dl_kw_repro(1)) if batch_size_adv > 0 else None
             self.test_loader = DataLoader(self.data_test, batch_size=batch_size_test, shuffle=False, **DL_KW)
             #self.val_loader = self.test_loader
 
@@ -5219,10 +5240,12 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
          adv_eps=8, adv_steps=20, adv_restarts=1, adv_pixel=True,
          eval_c_suite=False, c_corruptions='gaussian_noise,brightness', c_severities=5,
          imbalance='none', imb_factor=None, imb_seed=None,
-         ecg_lam_max=1.5, ecg_lam_beta=0.9, ecg_lam_eps=1e-6):
-    
+         ecg_lam_max=1.5, ecg_lam_beta=0.9, ecg_lam_eps=1e-6, seed=None):
+    if seed is not None:
+        os.environ["TRAIN_DATALOADER_SEED"] = str(seed)  # for DataLoader worker_init_fn (ImageNet etc.)
+
     dataset_loader = dataset(dataset_name=dataset_name, batch_size=batch, batch_size_adv=batch_adv,
-                             imbalance=imbalance, imb_factor=imb_factor, imb_seed=imb_seed)
+                             imbalance=imbalance, imb_factor=imb_factor, imb_seed=imb_seed, seed=seed)
     model_cnn = model(dataset_loader, dataset_name, device, devices_id, lr, momentum, lr_adv, momentum_adv, batch_adv, half_prec=half_prec, variants=variants)
     # ECG hyperparams from CLI
     model_cnn.ecg_lam = float(ecg_lam)
@@ -5797,4 +5820,5 @@ if __name__ == "__main__":
         getattr(args, "c_severities", 5), getattr(args, "imbalance", "none"), getattr(args, "imb_factor", None),
         getattr(args, "imb_seed", None),
         getattr(args, "ecg_lam_max", 1.5), getattr(args, "ecg_lam_beta", 0.9), getattr(args, "ecg_lam_eps", 1e-6),
+        getattr(args, "seed", 0),
     )
