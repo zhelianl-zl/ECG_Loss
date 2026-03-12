@@ -3740,36 +3740,26 @@ class trainModel():
                     opt.step()
 
 
-    def fgsm(self, model, X, y, epsilon=0.1, num_samples=10):
-        """ Construct FGSM adversarial examples on the examples X"""
-        
-        if self.half_prec: 
+    def fgsm(self, model, X, y, epsilon=0.1, num_samples=10, CrossEntropyFunction=False):
+        """Construct FGSM adversarial examples. For fair ADV eval use CrossEntropyFunction=True."""
+        if self.half_prec:
             delta = torch.zeros_like(X, requires_grad=True).cuda()
             delta.requires_grad = True
             X_input = X + delta
             y_pred = model(X_input)
-
             with torch.cuda.amp.autocast(dtype=torch.float16):
-                loss = self.LossFunction(model, X_input, y, y_pred, num_samples=num_samples)
-
-            self.scaler.scale(loss).backward()  
-
+                loss = self.LossFunction(model, X_input, y, y_pred, num_samples=num_samples, CrossEntropyFunction=CrossEntropyFunction)
+            self.scaler.scale(loss).backward()
             del X_input, y_pred
             torch.cuda.empty_cache()
-
         else:
             delta = torch.zeros_like(X, requires_grad=True)
             X_input = X + delta
             y_pred = model(X_input)
-
-            loss = self.LossFunction(model, X_input, y, y_pred, num_samples=num_samples)
+            loss = self.LossFunction(model, X_input, y, y_pred, num_samples=num_samples, CrossEntropyFunction=CrossEntropyFunction)
             loss.backward()
-
             del X_input, y_pred
             torch.cuda.empty_cache()
-            
-            #print(loss)
-            
         return epsilon * delta.grad.detach().sign()
 
 
@@ -3893,27 +3883,21 @@ class trainModel():
         return delta.detach()
 
 
-    def pgd_linf_rs(self, model, X, y, epsilon=0.1, alpha=0.01, num_iter=20, num_samples=10, randomize=False):
-        """ Construct FGSM adversarial examples on the examples X"""
-
+    def pgd_linf_rs(self, model, X, y, epsilon=0.1, alpha=0.01, num_iter=20, num_samples=10, randomize=False, CrossEntropyFunction=False):
+        """PGD-Linf with random start. Inputs are normalized; use Linf ball only (no [0,1] pixel clamp). For fair ADV eval use CrossEntropyFunction=True."""
         delta = torch.zeros_like(X).uniform_(-epsilon, epsilon)
-        delta.data = torch.max(torch.min(1-X, delta.data), 0-X)
 
         for _ in range(num_iter):
             delta.requires_grad = True
-            X_input = X +  delta
+            X_input = X + delta
             y_pred = model(X_input)
-                
-            loss = self.LossFunction(model, X_input, y, y_pred, num_samples=num_samples)
-            #loss = nn.CrossEntropyLoss()(output, y) #+ entropy_loss(output)
-
-            #loss =  nn.CrossEntropyLoss()(output, y)
+            loss = self.LossFunction(model, X_input, y, y_pred, num_samples=num_samples, CrossEntropyFunction=CrossEntropyFunction)
             loss.backward()
 
             grad = delta.grad.detach()
             I = y_pred.max(1)[1] == y
-            delta.data[I] = torch.clamp(delta + alpha * torch.sign(grad), -epsilon, epsilon)[I]
-            delta.data[I] = torch.max(torch.min(1-X, delta.data), 0-X)[I]
+            delta.data[I] = (delta.data[I] + alpha * torch.sign(grad)[I]).clamp(-epsilon, epsilon)
+            delta.grad = None
 
         return delta.detach()
 
@@ -4194,8 +4178,8 @@ class trainModel():
                 except Exception as e:
                     print(f"[extra_evals] C {corr} failed: {e}", flush=True)
 
-        # ---- LT metrics (CIFAR10 / CIFAR100 / SVHN): log when imbalance is set OR whenever extra evals run (so RunB_LT and all runs get LT/) ----
-        if dataset_name in ("cifar10", "cifar100", "svhn"):
+        # ---- LT metrics (RunB only): log only when imbalance != none (RunA must not produce LT/) ----
+        if imbalance != "none" and dataset_name in ("cifar10", "cifar100", "svhn"):
             try:
                 model.eval()
                 all_preds, all_labels = [], []
@@ -4597,13 +4581,13 @@ class trainModel():
             X, y = X.to(self.device), y.to(self.device)
             counter_inputs += len(y)
 
-            # ---- adversarial examples: dispatch by attack_type ----
+            # ---- adversarial examples: dispatch by attack_type (all use CE for fair ADV eval) ----
             if attack_type == "fgsm":
-                delta = self.fgsm(model, X, y, epsilon=epsilon, num_samples=num_samples, **kwargs)
+                delta = self.fgsm(model, X, y, epsilon=epsilon, num_samples=num_samples, CrossEntropyFunction=True, **kwargs)
             elif attack_type == "pgd_linf_rs":
                 delta = self.pgd_linf_rs(
                     model, X, y, epsilon=epsilon, num_iter=num_iter, alpha=alpha,
-                    num_samples=num_samples, **kwargs
+                    num_samples=num_samples, CrossEntropyFunction=True, **kwargs
                 )
             else:  # pgd_linf default
                 delta = self.pgd_linf(
