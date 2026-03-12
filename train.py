@@ -2127,8 +2127,11 @@ class trainModel():
 
         #opt = optim.Adam(model.parameters(), lr=lr/10.0)
 
+        stage2_lr_scale = float(getattr(self, "stage2_lr_scale", 0.1))
+        base_lr = lr if not cycle_lr else 10e-4
         for param_group in opt.param_groups:
-            param_group["lr"] = lr if not cycle_lr else  10e-4 #lr/10.0
+            param_group["lr"] = base_lr * stage2_lr_scale
+        print(f"[STAGE2] lr = {base_lr} * {stage2_lr_scale} = {base_lr * stage2_lr_scale}", flush=True)
 
         write_pred_logs = True
 
@@ -3113,10 +3116,7 @@ class trainModel():
                 delta = getattr(self, "ecg_lam_delta", 0.05)
                 eps = getattr(self, "ecg_lam_eps", 1e-6)
                 cur_epoch = float(getattr(self, "_current_epoch", 1))
-                total_epochs = float(getattr(self, "ecg_total_epochs", 1) or 1)
-                progress = (cur_epoch - 1.0) / max(total_epochs - 1.0, 1.0)
-                progress = max(0.0, min(1.0, progress))
-                lam_max = 1.5 + (2.0 - 1.5) * progress
+                lam_max = float(getattr(self, "ecg_lam_max", 1.8))  # fixed
                 if ecg_lam_rule == "auto_w":
                     warmup_epochs = 5
                     delta_eff = delta * min(1.0, cur_epoch / warmup_epochs)
@@ -5219,12 +5219,12 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
          ecg_tau_target, ecg_tau_lr, ecg_tau_ema, ecg_tau_deadzone, ecg_tau_min, ecg_tau_max,
          device, devices_id, lr, momentum, batch, lr_adv, momentum_adv, batch_adv,
          half_prec=False, variants='none', log_runtime=True, rt_sample_every=20,
-         stage2_fast=False, stage2_find_every=3, stage2_ce_log_every=5,
+         stage2_fast=False, stage2_find_every=3, stage2_ce_log_every=5, stage2_lr_scale=0.1,
          eval_extra_every=0, eval_adv_suite=False, adv_attacks='fgsm,pgd_linf,pgd_linf_rs',
          adv_eps=8, adv_steps=20, adv_restarts=1, adv_pixel=True,
          eval_c_suite=False, c_corruptions='gaussian_noise,brightness', c_severities=5,
          imbalance='none', imb_factor=None, imb_seed=None,
-         ecg_lam_max=1.5, ecg_lam_beta=0.9, ecg_lam_eps=1e-6, seed=None):
+         ecg_lam_max=1.8, ecg_lam_beta=0.9, ecg_lam_eps=1e-6, seed=None):
     if seed is not None:
         os.environ["TRAIN_DATALOADER_SEED"] = str(seed)  # for DataLoader worker_init_fn (ImageNet etc.)
 
@@ -5318,6 +5318,7 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
     model_cnn.log_runtime = bool(log_runtime)
     model_cnn.rt_sample_every = int(rt_sample_every)
 
+    model_cnn.stage2_lr_scale = float(stage2_lr_scale)
     # stage2 speed: reduce full-train passes for large datasets (e.g. ImageNet32)
     model_cnn.stage2_fast = bool(stage2_fast)
     model_cnn.stage2_find_every = int(stage2_find_every)
@@ -5440,7 +5441,7 @@ if __name__ == '__main__':
                         help="Start lam, 'auto'/'auto_w' (auto-lambda), or 'auto_d'/'auto_dw' (auto-lambda + reference-based auto-delta). Then ecg_lam_end=delta or initial_delta.")
     parser.add_argument("--ecg_lam_end", type=str, default=None,
                         help="End lam, or delta (target pre-norm strength) when ecg_lam_start=auto.")
-    parser.add_argument("--ecg_lam_max", type=float, default=1.5, help="Max lam when using auto-lambda.")
+    parser.add_argument("--ecg_lam_max", type=float, default=1.8, help="Max lam when using auto-lambda.")
     parser.add_argument("--ecg_lam_beta", type=float, default=0.9, help="EMA beta for gate_mean in auto-lambda.")
     parser.add_argument("--ecg_lam_eps", type=float, default=1e-6, help="Eps in lam = delta/(gate_ema+eps) for auto-lambda.")
     parser.add_argument("--ecg_tau_start", type=str, default=None,
@@ -5489,6 +5490,8 @@ if __name__ == '__main__':
     parser.add_argument("--dump_gates", type=str2bool, default=False, help="Dump gate stats for demo.")
     parser.add_argument("--dump_gates_n", type=int, default=2000, help="Number of samples for dump_gates.")
 
+    parser.add_argument("--stage2_lr_scale", type=float, default=0.1,
+                        help="Multiply lr by this when entering stage2 (avoids representation collapse, e.g. PGD 0.5).")
     # ---- stage2 speed (reduce full passes for large datasets e.g. ImageNet32) ----
     parser.add_argument("--stage2_fast", type=str2bool, default=False,
                         help="Reduce stage2 full passes: find misclassified every N epochs, log train CE every M.")
@@ -5796,13 +5799,13 @@ if __name__ == "__main__":
         args.lr_adv, args.momentum_adv, args.batch_adv,
         args.half_prec, args.variants,
         args.log_runtime, args.rt_sample_every,
-        args.stage2_fast, args.stage2_find_every, args.stage2_ce_log_every,
+        args.stage2_fast, args.stage2_find_every, args.stage2_ce_log_every, getattr(args, "stage2_lr_scale", 0.1),
         getattr(args, "eval_extra_every", 0), getattr(args, "eval_adv_suite", False),
         getattr(args, "adv_attacks", "fgsm,pgd_linf,pgd_linf_rs"), getattr(args, "adv_eps", 8),
         getattr(args, "adv_steps", 20), getattr(args, "adv_restarts", 1), getattr(args, "adv_pixel", True),
         getattr(args, "eval_c_suite", False), getattr(args, "c_corruptions", "gaussian_noise,brightness"),
         getattr(args, "c_severities", 5), getattr(args, "imbalance", "none"), getattr(args, "imb_factor", None),
         getattr(args, "imb_seed", None),
-        getattr(args, "ecg_lam_max", 1.5), getattr(args, "ecg_lam_beta", 0.9), getattr(args, "ecg_lam_eps", 1e-6),
+        getattr(args, "ecg_lam_max", 1.8), getattr(args, "ecg_lam_beta", 0.9), getattr(args, "ecg_lam_eps", 1e-6),
         getattr(args, "seed", 0),
     )

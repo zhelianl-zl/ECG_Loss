@@ -431,6 +431,7 @@ def main() -> None:
     _add_arg(cmd, "--stage2_fast", hp, "stage2_fast")
     _add_arg(cmd, "--stage2_find_every", hp, "stage2_find_every")
     _add_arg(cmd, "--stage2_ce_log_every", hp, "stage2_ce_log_every")
+    _add_arg(cmd, "--stage2_lr_scale", hp, "stage2_lr_scale")
 
     # record
     (run_dir / "cmd.txt").write_text(" ".join(cmd) + "\n", encoding="utf-8")
