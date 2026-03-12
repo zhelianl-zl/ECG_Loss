@@ -3116,7 +3116,7 @@ class trainModel():
                 delta = getattr(self, "ecg_lam_delta", 0.05)
                 eps = getattr(self, "ecg_lam_eps", 1e-6)
                 cur_epoch = float(getattr(self, "_current_epoch", 1))
-                lam_max = float(getattr(self, "ecg_lam_max", 1.4))  # fixed
+                lam_max = float(getattr(self, "ecg_lam_max", 1.5))  # fixed
                 if ecg_lam_rule == "auto_w":
                     warmup_epochs = 5
                     delta_eff = delta * min(1.0, cur_epoch / warmup_epochs)
@@ -5229,7 +5229,7 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
          adv_eps=8, adv_steps=20, adv_restarts=1, adv_pixel=True,
          eval_c_suite=False, c_corruptions='gaussian_noise,brightness', c_severities=5,
          imbalance='none', imb_factor=None, imb_seed=None,
-         ecg_lam_max=1.4, ecg_lam_beta=0.9, ecg_lam_eps=1e-6, seed=None):
+         ecg_lam_max=1.5, ecg_lam_beta=0.9, ecg_lam_eps=1e-6, seed=None):
     if seed is not None:
         os.environ["TRAIN_DATALOADER_SEED"] = str(seed)  # for DataLoader worker_init_fn (ImageNet etc.)
 
@@ -5446,7 +5446,7 @@ if __name__ == '__main__':
                         help="Start lam, 'auto'/'auto_w' (auto-lambda), or 'auto_d'/'auto_dw' (auto-lambda + reference-based auto-delta). Then ecg_lam_end=delta or initial_delta.")
     parser.add_argument("--ecg_lam_end", type=str, default=None,
                         help="End lam, or delta (target pre-norm strength) when ecg_lam_start=auto.")
-    parser.add_argument("--ecg_lam_max", type=float, default=1.4, help="Max lam when using auto-lambda.")
+    parser.add_argument("--ecg_lam_max", type=float, default=1.5, help="Max lam when using auto-lambda.")
     parser.add_argument("--ecg_lam_beta", type=float, default=0.9, help="EMA beta for gate_mean in auto-lambda.")
     parser.add_argument("--ecg_lam_eps", type=float, default=1e-6, help="Eps in lam = delta/(gate_ema+eps) for auto-lambda.")
     parser.add_argument("--ecg_tau_start", type=str, default=None,
@@ -5811,6 +5811,6 @@ if __name__ == "__main__":
         getattr(args, "eval_c_suite", False), getattr(args, "c_corruptions", "gaussian_noise,brightness"),
         getattr(args, "c_severities", 5), getattr(args, "imbalance", "none"), getattr(args, "imb_factor", None),
         getattr(args, "imb_seed", None),
-        getattr(args, "ecg_lam_max", 1.4), getattr(args, "ecg_lam_beta", 0.9), getattr(args, "ecg_lam_eps", 1e-6),
+        getattr(args, "ecg_lam_max", 1.5), getattr(args, "ecg_lam_beta", 0.9), getattr(args, "ecg_lam_eps", 1e-6),
         getattr(args, "seed", 0),
     )
