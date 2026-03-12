@@ -3116,7 +3116,7 @@ class trainModel():
                 delta = getattr(self, "ecg_lam_delta", 0.05)
                 eps = getattr(self, "ecg_lam_eps", 1e-6)
                 cur_epoch = float(getattr(self, "_current_epoch", 1))
-                lam_max = float(getattr(self, "ecg_lam_max", 1.8))  # fixed
+                lam_max = float(getattr(self, "ecg_lam_max", 1.5))  # fixed
                 if ecg_lam_rule == "auto_w":
                     warmup_epochs = 5
                     delta_eff = delta * min(1.0, cur_epoch / warmup_epochs)
@@ -4113,6 +4113,10 @@ class trainModel():
         eval_extra_every = int(getattr(self, "eval_extra_every", 0))
         if eval_extra_every <= 0 or (global_epoch % eval_extra_every != 0):
             return
+
+        was_training = model.training
+        model.eval()
+
         eval_adv_suite = getattr(self, "eval_adv_suite", False)
         adv_attacks_str = getattr(self, "adv_attacks", "fgsm,pgd_linf,pgd_linf_rs")
         adv_eps = float(getattr(self, "adv_eps", 8))
@@ -4182,7 +4186,6 @@ class trainModel():
         # ---- LT metrics (RunB only): log only when imbalance != none (RunA must not produce LT/) ----
         if imbalance != "none" and dataset_name in ("cifar10", "cifar100", "svhn"):
             try:
-                model.eval()
                 all_preds, all_labels = [], []
                 with torch.no_grad():
                     for X, y in loader.test_loader:
@@ -4211,7 +4214,6 @@ class trainModel():
                 to_log["LT/ManyAcc"] = many_acc
                 to_log["LT/MediumAcc"] = medium_acc
                 to_log["LT/FewAcc"] = few_acc
-                model.train()
             except Exception as e:
                 print(f"[extra_evals] LT failed: {e}", flush=True)
 
@@ -4223,6 +4225,9 @@ class trainModel():
                     print(f"[W&B] extra evals logged at epoch {global_epoch}: {list(to_log.keys())}", flush=True)
             except Exception as e:
                 print("[W&B extra_evals log skipped]", e, flush=True)
+
+        if was_training:
+            model.train()
 
     def MCdropout(self, model, X, y, num_samples=10, calibration=False):
     #def MCdropout(self, model, X, y, num_samples=10, adversarial=False, epsilon=0.1, num_iter=20, alpha=0.01, **kwargs):
@@ -5224,7 +5229,7 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
          adv_eps=8, adv_steps=20, adv_restarts=1, adv_pixel=True,
          eval_c_suite=False, c_corruptions='gaussian_noise,brightness', c_severities=5,
          imbalance='none', imb_factor=None, imb_seed=None,
-         ecg_lam_max=1.8, ecg_lam_beta=0.9, ecg_lam_eps=1e-6, seed=None):
+         ecg_lam_max=1.5, ecg_lam_beta=0.9, ecg_lam_eps=1e-6, seed=None):
     if seed is not None:
         os.environ["TRAIN_DATALOADER_SEED"] = str(seed)  # for DataLoader worker_init_fn (ImageNet etc.)
 
@@ -5441,7 +5446,7 @@ if __name__ == '__main__':
                         help="Start lam, 'auto'/'auto_w' (auto-lambda), or 'auto_d'/'auto_dw' (auto-lambda + reference-based auto-delta). Then ecg_lam_end=delta or initial_delta.")
     parser.add_argument("--ecg_lam_end", type=str, default=None,
                         help="End lam, or delta (target pre-norm strength) when ecg_lam_start=auto.")
-    parser.add_argument("--ecg_lam_max", type=float, default=1.8, help="Max lam when using auto-lambda.")
+    parser.add_argument("--ecg_lam_max", type=float, default=1.5, help="Max lam when using auto-lambda.")
     parser.add_argument("--ecg_lam_beta", type=float, default=0.9, help="EMA beta for gate_mean in auto-lambda.")
     parser.add_argument("--ecg_lam_eps", type=float, default=1e-6, help="Eps in lam = delta/(gate_ema+eps) for auto-lambda.")
     parser.add_argument("--ecg_tau_start", type=str, default=None,
@@ -5806,6 +5811,6 @@ if __name__ == "__main__":
         getattr(args, "eval_c_suite", False), getattr(args, "c_corruptions", "gaussian_noise,brightness"),
         getattr(args, "c_severities", 5), getattr(args, "imbalance", "none"), getattr(args, "imb_factor", None),
         getattr(args, "imb_seed", None),
-        getattr(args, "ecg_lam_max", 1.8), getattr(args, "ecg_lam_beta", 0.9), getattr(args, "ecg_lam_eps", 1e-6),
+        getattr(args, "ecg_lam_max", 1.5), getattr(args, "ecg_lam_beta", 0.9), getattr(args, "ecg_lam_eps", 1e-6),
         getattr(args, "seed", 0),
     )
