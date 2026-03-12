@@ -3114,18 +3114,9 @@ class trainModel():
                 eps = getattr(self, "ecg_lam_eps", 1e-6)
                 cur_epoch = float(getattr(self, "_current_epoch", 1))
                 total_epochs = float(getattr(self, "ecg_total_epochs", 1) or 1)
-                if total_epochs <= 1:
-                    progress = 1.0
-                else:
-                    progress = (cur_epoch - 1.0) / (total_epochs - 1.0)
-                    progress = max(0.0, min(1.0, progress))
-                # Staged lam_max: first 40% -> 1.5, next 30% -> 1.8, final 30% -> 2.0
-                if progress < 0.40:
-                    lam_max = 1.5
-                elif progress < 0.70:
-                    lam_max = 1.8
-                else:
-                    lam_max = 2.0
+                progress = (cur_epoch - 1.0) / max(total_epochs - 1.0, 1.0)
+                progress = max(0.0, min(1.0, progress))
+                lam_max = 1.5 + (2.0 - 1.5) * progress
                 if ecg_lam_rule == "auto_w":
                     warmup_epochs = 5
                     delta_eff = delta * min(1.0, cur_epoch / warmup_epochs)
