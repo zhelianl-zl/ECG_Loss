@@ -3884,7 +3884,7 @@ class trainModel():
 
 
     def pgd_linf_rs(self, model, X, y, epsilon=0.1, alpha=0.01, num_iter=20, num_samples=10, randomize=False, CrossEntropyFunction=False):
-        """PGD-Linf with random start. Inputs are normalized; use Linf ball only (no [0,1] pixel clamp). For fair ADV eval use CrossEntropyFunction=True."""
+        """PGD-Linf with random start; same update rule as pgd_linf (attack-all). Linf ball only. For fair ADV eval use CrossEntropyFunction=True."""
         delta = torch.zeros_like(X).uniform_(-epsilon, epsilon)
 
         for _ in range(num_iter):
@@ -3894,9 +3894,7 @@ class trainModel():
             loss = self.LossFunction(model, X_input, y, y_pred, num_samples=num_samples, CrossEntropyFunction=CrossEntropyFunction)
             loss.backward()
 
-            grad = delta.grad.detach()
-            I = y_pred.max(1)[1] == y
-            delta.data[I] = (delta.data[I] + alpha * torch.sign(grad)[I]).clamp(-epsilon, epsilon)
+            delta.data = (delta.data + alpha * delta.grad.detach().sign()).clamp(-epsilon, epsilon)
             delta.grad = None
 
         return delta.detach()
