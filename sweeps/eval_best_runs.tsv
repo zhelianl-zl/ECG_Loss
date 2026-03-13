@@ -1,0 +1,20 @@
+# Offline evaluation of best runs from saved checkpoints.
+# Fill in job/task IDs for each run you want to evaluate.
+# Lines starting with # are comments and will be skipped.
+# Columns: dataset	job	task	wandb_project	wandb_group	wandb_name	attacks	c_corruptions	c_severity	imbalance	imb_factor
+dataset	job	task	wandb_project	wandb_group	wandb_name	attacks	c_corruptions	c_severity	imbalance	imb_factor
+binaryCifar10	<job_id>	<task_id>	ecg_binary_pmax	Eval	eval_binaryCifar10_CE	fgsm,pgd_linf,pgd_linf_rs			none	
+binaryCifar10	<job_id>	<task_id>	ecg_binary_pmax	Eval	eval_binaryCifar10_ECGS	fgsm,pgd_linf,pgd_linf_rs			none	
+cifar10	<job_id>	<task_id>	ecg-cifar10	Eval	eval_cifar10_CE	fgsm,pgd_linf,pgd_linf_rs	gaussian_noise,brightness	5	none	
+cifar10	<job_id>	<task_id>	ecg-cifar10	Eval	eval_cifar10_ECGS	fgsm,pgd_linf,pgd_linf_rs	gaussian_noise,brightness	5	none	
+cifar100	<job_id>	<task_id>	ecg-cifar100-pmax	Eval	eval_cifar100_CE	fgsm,pgd_linf,pgd_linf_rs	gaussian_noise,brightness	5	none	
+cifar100	<job_id>	<task_id>	ecg-cifar100-pmax	Eval	eval_cifar100_ECGS	fgsm,pgd_linf,pgd_linf_rs	gaussian_noise,brightness	5	none	
+svhn	<job_id>	<task_id>	ecg-svhn-pmax	Eval	eval_svhn_CE	fgsm,pgd_linf,pgd_linf_rs			none	
+svhn	<job_id>	<task_id>	ecg-svhn-pmax	Eval	eval_svhn_ECGS	fgsm,pgd_linf,pgd_linf_rs			none	
+imageNet	<job_id>	<task_id>	cegs-imageNet32-pmax	Eval	eval_imageNet_CE	fgsm,pgd_linf,pgd_linf_rs			none	
+imageNet	<job_id>	<task_id>	cegs-imageNet32-pmax	Eval	eval_imageNet_ECGS	fgsm,pgd_linf,pgd_linf_rs			none	
+# Long-tail rows (cifar10/cifar100/svhn only)
+cifar10	<job_id>	<task_id>	ecg-cifar10	Eval	eval_cifar10_CE_LT	fgsm,pgd_linf,pgd_linf_rs	gaussian_noise,brightness	5	exp	100
+cifar10	<job_id>	<task_id>	ecg-cifar10	Eval	eval_cifar10_ECGS_LT	fgsm,pgd_linf,pgd_linf_rs	gaussian_noise,brightness	5	exp	100
+svhn	<job_id>	<task_id>	ecg-svhn-pmax	Eval	eval_svhn_CE_LT	fgsm,pgd_linf,pgd_linf_rs			exp	100
+svhn	<job_id>	<task_id>	ecg-svhn-pmax	Eval	eval_svhn_ECGS_LT	fgsm,pgd_linf,pgd_linf_rs			exp	100
