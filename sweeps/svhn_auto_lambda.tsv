@@ -1,10 +1,4 @@
 #wandb_project=ecg-svhn-pmax
 dataset	seed	stop	stop_val	lr	momentum	batch	workers	half_prec	variants	type	pe_mode	stage1_epochs	stage2_epochs	loss_stage1	loss_stage2	ecg_conf_type	ecg_detach_gates	ecg_schedule	ecg_lam_start	ecg_lam_end	ecg_tau_start	ecg_tau_end	ecg_k_start	ecg_k_end	force_run	method_name	run_kind
-svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.00	0.20	q	0.72	15	15	True	svhn_q72_k15_lam0_20	ablation
-svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.00	0.20	q	0.76	15	15	True	svhn_q76_k15_lam0_20	ablation
-svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.00	0.20	q	0.78	15	15	True	svhn_q78_k15_lam0_20	ablation
-svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.00	0.20	q	0.80	15	15	True	svhn_q80_k15_lam0_20	ablation
-svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.00	0.20	q	0.82	15	15	True	svhn_q82_k15_lam0_20	ablation
-svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.00	0.20	q	0.84	15	15	True	svhn_q84_k15_lam0_20	ablation
-svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.00	0.20	q	0.86	15	15	True	svhn_q86_k15_lam0_20	ablation
-svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	0.00	0.20	q	0.88	15	15	True	svhn_q88_k15_lam0_20	ablation
+svhn	0	epochs	100	0.01	0.9	64	0	True	none	std	logk_rms	100	0	ce	ce	none	True	none	0	0	0	0	0	0	True	svhn_ce60_baseline_pmaxlin	ablation
+svhn	0	epochs	100	0.01	0.9	64	0	True	none	std	logk_rms	100	0	ecg	ecg	pmax	True	linear	auto_dw	0.05	auto_q	0.60	20	20	True	svhn_autoDW_autoQ06_k20_pmaxlin	ablation
