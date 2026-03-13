@@ -1,0 +1,8 @@
+#wandb_project=cegs-imageNet32-pmax
+dataset	seed	stop	stop_val	lr	momentum	batch	workers	half_prec	variants	type	pe_mode	stage1_epochs	stage2_epochs	loss_stage1	loss_stage2	ecg_conf_type	ecg_detach_gates	ecg_schedule	ecg_lam_start	ecg_lam_end	ecg_tau_start	ecg_tau_end	ecg_k_start	ecg_k_end	force_run	method_name	run_kind	stage2_fast	stage2_find_every	stage2_ce_log_every
+imageNet	0	epochs	60	0.01	0.9	64	5	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	none	auto_d	0.10	auto_q	0.60	20	20	True	imnet32_fullECG_autod_q60_d010_lr0p01_b64	official	False	10	20
+imageNet	0	epochs	60	0.01	0.9	64	5	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	none	auto_d	0.12	auto_q	0.65	20	20	True	imnet32_fullECG_autod_q65_d012_lr0p01_b64	official	False	10	20
+imageNet	0	epochs	60	0.01	0.9	64	5	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	none	auto_d	0.15	auto_q	0.70	20	20	True	imnet32_fullECG_autod_q70_d015_lr0p01_b64	official	False	10	20
+imageNet	0	epochs	60	0.01	0.9	64	5	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	none	auto_dw	0.10	auto_q	0.60	20	20	True	imnet32_fullECG_autodw_q60_d010_lr0p01_b64	official	False	10	20
+imageNet	0	epochs	60	0.01	0.9	64	5	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	none	auto_dw	0.12	auto_q	0.65	20	20	True	imnet32_fullECG_autodw_q65_d012_lr0p01_b64	official	False	10	20
+imageNet	0	epochs	60	0.01	0.9	64	5	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	none	auto_dw	0.15	auto_q	0.70	20	20	True	imnet32_fullECG_autodw_q70_d015_lr0p01_b64	official	False	10	20
