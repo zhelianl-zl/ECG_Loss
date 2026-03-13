@@ -1,11 +1,11 @@
 # Offline evaluation of best runs from saved checkpoints.
 # Lines starting with # are comments and will be skipped.
 dataset	job	task	wandb_project	wandb_group	wandb_name	attacks	c_corruptions	c_severity	imbalance	imb_factor
-binaryCifar10	37894333	0	ecg_binary_pmax	Eval	eval_binaryCifar10_CE_best	fgsm,pgd_linf,pgd_linf_rs			none	
+binaryCifar10	37894333	7	ecg_binary_pmax	Eval	eval_binaryCifar10_CE_best	fgsm,pgd_linf,pgd_linf_rs			none	
 binaryCifar10	37976255	0	ecg_binary_pmax	Eval	eval_binaryCifar10_ECGS_best	fgsm,pgd_linf,pgd_linf_rs			none	
-cifar10	37773773	0	ecg-cifar10	Eval	eval_cifar10_CE_best	fgsm,pgd_linf,pgd_linf_rs	gaussian_noise,brightness	5	none	
-cifar10	37899839	0	ecg-cifar10	Eval	eval_cifar10_ECGS_best	fgsm,pgd_linf,pgd_linf_rs	gaussian_noise,brightness	5	none	
+cifar10	37773773	7	ecg-cifar10	Eval	eval_cifar10_CE_best	fgsm,pgd_linf,pgd_linf_rs	gaussian_noise,brightness	5	none	
+cifar10	37899839	7	ecg-cifar10	Eval	eval_cifar10_ECGS_best	fgsm,pgd_linf,pgd_linf_rs	gaussian_noise,brightness	5	none	
 svhn	37775358	8	ecg-svhn-pmax	Eval	eval_svhn_CE_best	fgsm,pgd_linf,pgd_linf_rs			none	
-svhn	37912723	0	ecg-svhn-pmax	Eval	eval_svhn_ECGS_best	fgsm,pgd_linf,pgd_linf_rs			none	
+svhn	37912723	1	ecg-svhn-pmax	Eval	eval_svhn_ECGS_best	fgsm,pgd_linf,pgd_linf_rs			none	
 cifar100	37775799	8	ecg-cifar100-pmax	Eval	eval_cifar100_CE_best	fgsm,pgd_linf,pgd_linf_rs	gaussian_noise,brightness	5	none	
 cifar100	37902625	0	ecg-cifar100-pmax	Eval	eval_cifar100_ECGS_best	fgsm,pgd_linf,pgd_linf_rs	gaussian_noise,brightness	5	none	
