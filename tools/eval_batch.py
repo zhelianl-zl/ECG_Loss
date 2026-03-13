@@ -4,8 +4,14 @@ Batch evaluation runner: reads a TSV config and runs eval_checkpoints.run_eval()
 for each row.
 
 Usage:
+  # Run all rows sequentially
   python tools/eval_batch.py --conf sweeps/eval_best_runs.tsv
-  python tools/eval_batch.py --conf sweeps/eval_best_runs.tsv --runs_dir /ocean/projects/cis260049p/zliu49/cegs_runs
+
+  # Run a single row (0-indexed, for SLURM array jobs)
+  python tools/eval_batch.py --conf sweeps/eval_best_runs.tsv --row 3
+
+  # Auto-detect row from SLURM_ARRAY_TASK_ID
+  python tools/eval_batch.py --conf sweeps/eval_best_runs.tsv --row slurm
 """
 
 import os
@@ -86,6 +92,8 @@ def row_to_args(row, runs_dir, device, batch_size):
 def main():
     parser = argparse.ArgumentParser(description="Batch offline checkpoint evaluator")
     parser.add_argument("--conf", type=str, required=True, help="Path to eval TSV config.")
+    parser.add_argument("--row", type=str, default=None,
+                        help="Run only this row (0-indexed). Use 'slurm' to read SLURM_ARRAY_TASK_ID.")
     parser.add_argument("--runs_dir", type=str, default=DEFAULT_RUNS_DIR,
                         help="Base directory for SLURM run outputs.")
     parser.add_argument("--device", type=str, default="cuda")
@@ -95,12 +103,24 @@ def main():
     rows = parse_tsv(cli.conf)
     print(f"Loaded {len(rows)} evaluation rows from {cli.conf}")
 
-    for i, row in enumerate(rows):
+    if cli.row is not None:
+        if cli.row == "slurm":
+            idx = int(os.environ["SLURM_ARRAY_TASK_ID"])
+        else:
+            idx = int(cli.row)
+        if idx >= len(rows):
+            print(f"Row index {idx} out of range (only {len(rows)} data rows).")
+            sys.exit(1)
+        rows = [(idx, rows[idx])]
+    else:
+        rows = list(enumerate(rows))
+
+    for i, row in rows:
         if "<job_id>" in row.get("job", "") or "<task_id>" in row.get("task", ""):
-            print(f"\n[{i+1}/{len(rows)}] SKIP (placeholder IDs): {row.get('wandb_name', '?')}")
+            print(f"\n[row {i}] SKIP (placeholder IDs): {row.get('wandb_name', '?')}")
             continue
         print(f"\n{'#'*70}")
-        print(f"  [{i+1}/{len(rows)}]  {row.get('wandb_name', row['dataset'])}")
+        print(f"  [row {i}]  {row.get('wandb_name', row['dataset'])}")
         print(f"{'#'*70}")
         args = row_to_args(row, cli.runs_dir, cli.device, cli.batch_size)
         try:
@@ -110,7 +130,7 @@ def main():
             import traceback
             traceback.print_exc()
 
-    print(f"\nAll done. Processed {len(rows)} rows.")
+    print(f"\nAll done.")
 
 
 if __name__ == "__main__":
