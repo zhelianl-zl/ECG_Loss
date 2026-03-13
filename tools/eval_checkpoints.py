@@ -365,17 +365,30 @@ def find_checkpoints(ckpt_dir, pattern="*_epoch*.pt"):
 def resolve_job_models_dir(runs_dir, job, task):
     """Resolve checkpoint directory from SLURM job/task IDs.
 
-    Path pattern: {runs_dir}/*{job}*_{task}/src/models/
+    Tries in order:
+      1. {runs_dir}/*{job}*_{task}/src/models/   (exact job+task)
+      2. {runs_dir}/*_{job}_{task}/src/models/    (exact suffix)
+      3. {runs_dir}/*{job}*/src/models/           (job only, if unique)
     """
-    pattern = os.path.join(runs_dir, f"*{job}*_{task}", "src", "models")
-    matches = glob.glob(pattern)
+    pattern1 = os.path.join(runs_dir, f"*{job}*_{task}", "src", "models")
+    matches = glob.glob(pattern1)
     if not matches:
-        pattern_alt = os.path.join(runs_dir, f"*{job}_{task}", "src", "models")
-        matches = glob.glob(pattern_alt)
+        pattern2 = os.path.join(runs_dir, f"*_{job}_{task}", "src", "models")
+        matches = glob.glob(pattern2)
+    if not matches:
+        pattern3 = os.path.join(runs_dir, f"*{job}*", "src", "models")
+        matches = glob.glob(pattern3)
+        if len(matches) == 1:
+            print(f"  [INFO] Exact job+task not found, using unique match: {matches[0]}")
+        elif len(matches) > 1:
+            raise FileNotFoundError(
+                f"Multiple directories match job={job} under {runs_dir}, "
+                f"please specify correct task.\n  Matches: {matches}"
+            )
     if not matches:
         raise FileNotFoundError(
             f"No run directory found for job={job} task={task} under {runs_dir}\n"
-            f"  Tried: {pattern}"
+            f"  Tried: {pattern1}"
         )
     if len(matches) > 1:
         print(f"  [WARN] Multiple matches for job={job} task={task}, using first: {matches[0]}")
