@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH -N 1
-#SBATCH -t 04:00:00
+#SBATCH -t 08:00:00
 #SBATCH -J eval_best
 #SBATCH -o slurm_logs/eval_best_%A_%a.out
 #SBATCH -e slurm_logs/eval_best_%A_%a.err
