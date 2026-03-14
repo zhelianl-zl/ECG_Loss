@@ -1,0 +1,11 @@
+#wandb_project=ecg-svhn-pmax
+# Group1: lam_max sweep (rows 1-3). Group2: delta sweep (rows 4-5). Group3: auto_q sweep (rows 6-7).
+dataset	seed	stop	stop_val	lr	momentum	batch	workers	half_prec	variants	type	pe_mode	stage1_epochs	stage2_epochs	loss_stage1	loss_stage2	ecg_conf_type	ecg_detach_gates	ecg_schedule	ecg_lam_start	ecg_lam_end	ecg_tau_start	ecg_tau_end	ecg_k_start	ecg_k_end	force_run	method_name	run_kind	ecg_lam_max
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ce	ce	none	True	none							True	svhn_CE_baseline	sweep	
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	auto_dw	0.05	auto_q	0.60	20	20	True	svhn_ECGS_lammax0.3	sweep	0.3
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	auto_dw	0.05	auto_q	0.60	20	20	True	svhn_ECGS_lammax0.5	sweep	0.5
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	auto_dw	0.05	auto_q	0.60	20	20	True	svhn_ECGS_lammax0.8	sweep	0.8
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	auto_dw	0.10	auto_q	0.60	20	20	True	svhn_ECGS_delta0.10_lammax0.5	sweep	0.5
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	auto_dw	0.15	auto_q	0.60	20	20	True	svhn_ECGS_delta0.15_lammax0.5	sweep	0.5
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	auto_dw	0.05	auto_q	0.70	20	20	True	svhn_ECGS_autoq0.70_lammax0.5	sweep	0.5
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	auto_dw	0.05	auto_q	0.80	20	20	True	svhn_ECGS_autoq0.80_lammax0.5	sweep	0.5
