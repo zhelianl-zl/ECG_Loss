@@ -2127,11 +2127,7 @@ class trainModel():
 
         #opt = optim.Adam(model.parameters(), lr=lr/10.0)
 
-        stage2_lr_scale = float(getattr(self, "stage2_lr_scale", 0.1))
-        base_lr = lr if not cycle_lr else 10e-4
-        for param_group in opt.param_groups:
-            param_group["lr"] = base_lr * stage2_lr_scale
-        print(f"[STAGE2] lr = {base_lr} * {stage2_lr_scale} = {base_lr * stage2_lr_scale}", flush=True)
+        print(f"[STAGE2] lr = {opt.param_groups[0]['lr']} (unchanged from stage1)", flush=True)
 
         write_pred_logs = True
 
