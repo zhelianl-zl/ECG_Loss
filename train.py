@@ -5661,8 +5661,9 @@ if __name__ == "__main__":
         args.stage1_epochs = int(args.stop_val)
         args.stage2_epochs = 0
 
-    # ImageNet (e.g. 32x32): auto-enable stage2_fast so step2 doesn't run full-train find/CE every epoch (was 17h for 22 epoch)
-    if str(args.dataset).lower().startswith("imagenet") and int(args.stage2_epochs) > 0 and (not args.stage2_fast):
+    # Auto-enable stage2_fast when stage2 is active: batch_mix2 runs a full forward pass
+    # every mini-batch iteration when stage2_fast=False, making stage2 ~500x slower than expected.
+    if int(args.stage2_epochs) > 0 and (not args.stage2_fast):
         args.stage2_fast = True
         args.stage2_find_every = max(args.stage2_find_every, 5)
         args.stage2_ce_log_every = max(args.stage2_ce_log_every, 10)
