@@ -2127,7 +2127,7 @@ class trainModel():
 
         #opt = optim.Adam(model.parameters(), lr=lr/10.0)
 
-        stage2_lr_scale = float(getattr(self, "stage2_lr_scale", 1.0))
+        stage2_lr_scale = float(getattr(self, "stage2_lr_scale", 0.1))
         base_lr = lr if not cycle_lr else 10e-4
         for param_group in opt.param_groups:
             param_group["lr"] = base_lr * stage2_lr_scale
@@ -5224,7 +5224,7 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
          ecg_tau_target, ecg_tau_lr, ecg_tau_ema, ecg_tau_deadzone, ecg_tau_min, ecg_tau_max,
          device, devices_id, lr, momentum, batch, lr_adv, momentum_adv, batch_adv,
          half_prec=False, variants='none', log_runtime=True, rt_sample_every=20,
-         stage2_fast=False, stage2_find_every=3, stage2_ce_log_every=5, stage2_lr_scale=1.0,
+         stage2_fast=False, stage2_find_every=3, stage2_ce_log_every=5, stage2_lr_scale=0.1,
          eval_extra_every=0, eval_adv_suite=False, adv_attacks='fgsm,pgd_linf,pgd_linf_rs',
          adv_eps=8, adv_steps=20, adv_restarts=1, adv_pixel=True,
          eval_c_suite=False, c_corruptions='gaussian_noise,brightness', c_severities=5,
@@ -5495,8 +5495,8 @@ if __name__ == '__main__':
     parser.add_argument("--dump_gates", type=str2bool, default=False, help="Dump gate stats for demo.")
     parser.add_argument("--dump_gates_n", type=int, default=2000, help="Number of samples for dump_gates.")
 
-    parser.add_argument("--stage2_lr_scale", type=float, default=1.0,
-                        help="Multiply lr by this when entering stage2 (1.0 = keep same lr).")
+    parser.add_argument("--stage2_lr_scale", type=float, default=0.1,
+                        help="Multiply lr by this when entering stage2 (avoids representation collapse, e.g. PGD 0.5).")
     # ---- stage2 speed (reduce full passes for large datasets e.g. ImageNet32) ----
     parser.add_argument("--stage2_fast", type=str2bool, default=False,
                         help="Reduce stage2 full passes: find misclassified every N epochs, log train CE every M.")
@@ -5805,7 +5805,7 @@ if __name__ == "__main__":
         args.lr_adv, args.momentum_adv, args.batch_adv,
         args.half_prec, args.variants,
         args.log_runtime, args.rt_sample_every,
-        args.stage2_fast, args.stage2_find_every, args.stage2_ce_log_every, getattr(args, "stage2_lr_scale", 1.0),
+        args.stage2_fast, args.stage2_find_every, args.stage2_ce_log_every, getattr(args, "stage2_lr_scale", 0.1),
         getattr(args, "eval_extra_every", 0), getattr(args, "eval_adv_suite", False),
         getattr(args, "adv_attacks", "fgsm,pgd_linf,pgd_linf_rs"), getattr(args, "adv_eps", 8),
         getattr(args, "adv_steps", 20), getattr(args, "adv_restarts", 1), getattr(args, "adv_pixel", True),
