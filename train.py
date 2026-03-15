@@ -73,6 +73,7 @@ from cals import AugLagrangian, AugLagrangianClass
 
 from ecg_loss import ecg_loss
 LOSS_ECG = "ecg"
+_AUTO_LAM_RULES = ("auto", "auto_w", "auto_d", "auto_dw", "auto_tr")
 
 # --- PE mode switches ---
 PE_MODE = "raw"          # "raw" | "logk" | "logk_rms" | "none" (none/raw = no PE norm)
@@ -1335,7 +1336,7 @@ class trainModel():
           - adaptive: adjust params online based on recent error trend
           - tau_target: adjust tau online to keep gate active fraction near a target (Scheme C)
 
-        When ecg_lam_rule in ("auto", "auto_w", "auto_d", "auto_dw"): lam is only from gate_ema and delta (no schedule).
+        When ecg_lam_rule in _AUTO_LAM_RULES: lam is only from gate_ema and delta (no schedule).
         ecg_lam_start/ecg_lam_end are not used for lam; ecg_lam_end in TSV is delta (or initial_delta for auto_d/auto_dw).
         auto_w: delta_eff = delta * min(1, epoch/5). auto_d/auto_dw: delta adapts from scale_p99 reference; auto_dw = 5-epoch warmup.
         """
@@ -1356,7 +1357,7 @@ class trainModel():
         self.ecg_k_base = float(getattr(self, "ecg_k", 10.0))
 
         # Start/end defaults (if not provided, keep constant). Auto-lambda: lam set per-batch from gate_ema
-        if getattr(self, "ecg_lam_rule", None) in ("auto", "auto_w", "auto_d", "auto_dw"):
+        if getattr(self, "ecg_lam_rule", None) in _AUTO_LAM_RULES:
             self.ecg_lam_start = None
             self.ecg_lam_end = None
         else:
@@ -1387,7 +1388,7 @@ class trainModel():
 
         # Initialize visible params for scheduled modes
         if self.ecg_schedule in ("linear", "cosine"):
-            if getattr(self, "ecg_lam_rule", None) not in ("auto", "auto_w", "auto_d", "auto_dw") and self.ecg_lam_start is not None:
+            if getattr(self, "ecg_lam_rule", None) not in _AUTO_LAM_RULES and self.ecg_lam_start is not None:
                 self.ecg_lam = float(self.ecg_lam_start)
             if getattr(self, "ecg_tau_rule", None) not in ("quantile", "auto_q"):
                 self.ecg_tau = float(self.ecg_tau_start) if self.ecg_tau_start is not None else self.ecg_tau_base
@@ -1625,7 +1626,7 @@ class trainModel():
 
         if sched in ("linear", "cosine"):
             t = self._ecg_schedule_progress(global_epoch)
-            lam_auto = getattr(self, "ecg_lam_rule", None) in ("auto", "auto_w", "auto_d", "auto_dw")
+            lam_auto = getattr(self, "ecg_lam_rule", None) in _AUTO_LAM_RULES
             tau_quantile = getattr(self, "ecg_tau_rule", None) in ("quantile", "auto_q")
             if lam_auto and tau_quantile:
                 # both auto: only schedule k
@@ -1664,7 +1665,7 @@ class trainModel():
         elif sched == "adaptive":
             st = getattr(self, "_ecg_adapt_state", None)
             if st is not None:
-                if getattr(self, "ecg_lam_rule", None) not in ("auto", "auto_w", "auto_d", "auto_dw"):
+                if getattr(self, "ecg_lam_rule", None) not in _AUTO_LAM_RULES:
                     self.ecg_lam = float(st["lam"])
                 self.ecg_tau = float(st["tau"])
                 self.ecg_k = float(st["k"])
@@ -1675,7 +1676,7 @@ class trainModel():
             # and to be correctly applied from epoch 1.
             t = self._ecg_schedule_progress(global_epoch)
             # lam schedule (skip when auto-lambda)
-            if getattr(self, "ecg_lam_rule", None) not in ("auto", "auto_w", "auto_d", "auto_dw") and getattr(self, "ecg_lam_start", None) is not None and getattr(self, "ecg_lam_end", None) is not None:
+            if getattr(self, "ecg_lam_rule", None) not in _AUTO_LAM_RULES and getattr(self, "ecg_lam_start", None) is not None and getattr(self, "ecg_lam_end", None) is not None:
                 self.ecg_lam = self._ecg_interp(self.ecg_lam_start, self.ecg_lam_end, t)
             # k schedule
             if hasattr(self, "ecg_k_start") and hasattr(self, "ecg_k_end"):
@@ -1693,12 +1694,26 @@ class trainModel():
                     "ECG/schedule_progress": float(self._ecg_schedule_progress(global_epoch)),
                     "ECG/schedule": str(sched),
                 }
-                if getattr(self, "ecg_lam_rule", None) in ("auto", "auto_w", "auto_d", "auto_dw"):
+                if getattr(self, "ecg_lam_rule", None) in _AUTO_LAM_RULES:
                     to_log["ECG/gate_ema"] = float(getattr(self, "_ecg_gate_ema", 0.0))
                     to_log["ECG/lam_auto"] = float(getattr(self, "ecg_lam", 0.0))
                     if getattr(self, "ecg_lam_rule", None) == "auto_w":
                         delta = getattr(self, "ecg_lam_delta", 0.05)
                         to_log["ECG/delta_eff"] = float(delta * min(1.0, global_epoch / 5.0))
+                    if getattr(self, "ecg_lam_rule", None) == "auto_tr":
+                        to_log["ECG/gate_mean_ema"] = float(getattr(self, "_ecg_gate_ema", 0.0))
+                        to_log["ECG/gate_p95_ema"] = float(getattr(self, "_ecg_gate_p95_ema", 0.0))
+                        to_log["ECG/conf_gate_active_frac_ema"] = float(getattr(self, "_ecg_active_frac_ema", 0.0))
+                        to_log["ECG/lam_auto_raw"] = float(getattr(self, "_ecg_lam_auto_raw", 0.0))
+                        to_log["ECG/lam_auto_after_guard"] = float(getattr(self, "_ecg_lam_auto_after_guard", 0.0))
+                        to_log["ECG/tail_ratio_target"] = float(getattr(self, "ecg_tail_ratio_target", 3.0))
+                        lam_cur = float(getattr(self, "ecg_lam", 0.0))
+                        gme = float(getattr(self, "_ecg_gate_ema", 0.0))
+                        g95 = float(getattr(self, "_ecg_gate_p95_ema", 0.0))
+                        if gme > 1e-12:
+                            to_log["ECG/tail_ratio_est"] = (1.0 + lam_cur * g95) / (1.0 + lam_cur * gme)
+                        else:
+                            to_log["ECG/tail_ratio_est"] = 0.0
                     # auto_d/auto_dw: delta_cur, delta_eff, scale_p99_ema logged only at epoch end
                 wandb.log(to_log, step=int(global_epoch))
         except Exception:
@@ -1819,7 +1834,7 @@ class trainModel():
             try:
                 if getattr(self, "ecg_total_epochs", None) is not None:
                     t = self._ecg_schedule_progress(int(global_epoch))
-                    if getattr(self, "ecg_lam_rule", None) not in ("auto", "auto_w", "auto_d", "auto_dw"):
+                    if getattr(self, "ecg_lam_rule", None) not in _AUTO_LAM_RULES:
                         lam_new = (1.0 - t) * float(getattr(self, "ecg_lam_start", getattr(self, "ecg_lam", 0.0))) + t * float(getattr(self, "ecg_lam_end", getattr(self, "ecg_lam", 0.0)))
                         self.ecg_lam = float(lam_new)
                     k_new   = (1.0 - t) * float(getattr(self, "ecg_k_start", getattr(self, "ecg_k", 0.0)))   + t * float(getattr(self, "ecg_k_end", getattr(self, "ecg_k", 0.0)))
@@ -3106,7 +3121,7 @@ class trainModel():
             # Auto-lambda: lam from gate_ema and delta (no schedule). auto_w: delta_eff = delta * min(1, epoch/5).
             # auto_d/auto_dw: delta_eff from _ecg_delta_eff (updated at epoch end); auto_dw = 5-epoch warmup on delta_eff.
             ecg_lam_rule = getattr(self, "ecg_lam_rule", None)
-            use_lam_auto = ecg_lam_rule in ("auto", "auto_w", "auto_d", "auto_dw")
+            use_lam_auto = ecg_lam_rule in _AUTO_LAM_RULES
             if use_lam_auto:
                 gate_ema = getattr(self, "_ecg_gate_ema", None)
                 delta = getattr(self, "ecg_lam_delta", 0.05)
@@ -3121,12 +3136,37 @@ class trainModel():
                 elif ecg_lam_rule == "auto_dw":
                     warmup_epochs = getattr(self, "ecg_auto_d_warmup_epochs", 5)
                     delta_eff = getattr(self, "_ecg_delta_eff", delta) * min(1.0, cur_epoch / warmup_epochs)
+                elif ecg_lam_rule == "auto_tr":
+                    mean_g = getattr(self, "_ecg_gate_ema", None)
+                    hi_g = getattr(self, "_ecg_gate_p95_ema", None)
+                    r = float(getattr(self, "ecg_tail_ratio_target", 3.0))
+                    if mean_g is None or hi_g is None:
+                        lam_cur = 0.0
+                        self._ecg_lam_auto_raw = 0.0
+                        self._ecg_lam_auto_after_guard = 0.0
+                    else:
+                        denom = hi_g - r * mean_g
+                        if denom <= 1e-8:
+                            lam_cur_raw = 0.0
+                        else:
+                            lam_cur_raw = (r - 1.0) / denom
+                        lam_cur = min(lam_max, max(0.0, lam_cur_raw))
+                        self._ecg_lam_auto_raw = lam_cur_raw
+                        afrac = getattr(self, "_ecg_active_frac_ema", None)
+                        floor = float(getattr(self, "ecg_active_frac_floor", 0.05))
+                        if afrac is not None and afrac < floor:
+                            if getattr(self, "ecg_sparse_lam_zero", False):
+                                lam_cur = 0.0
+                            else:
+                                lam_cur *= float(getattr(self, "ecg_sparse_lam_decay", 0.5))
+                        self._ecg_lam_auto_after_guard = lam_cur
                 else:
                     delta_eff = delta
-                if gate_ema is None:
-                    lam_cur = lam_max
-                else:
-                    lam_cur = min(lam_max, max(0.0, delta_eff / (gate_ema + eps)))
+                if ecg_lam_rule != "auto_tr":
+                    if gate_ema is None:
+                        lam_cur = lam_max
+                    else:
+                        lam_cur = min(lam_max, max(0.0, delta_eff / (gate_ema + eps)))
             else:
                 lam_cur = self.ecg_lam
             ecg_tau_rule = getattr(self, "ecg_tau_rule", None)
@@ -3164,7 +3204,8 @@ class trainModel():
                     detach_gates=getattr(self, "ecg_detach_gates", True),
                     scale_normalize=use_lam_auto,
                 )
-            # Auto-lambda: only update gate_ema in training (avoid drift in eval/val); optional DDP sync
+            # Auto-lambda: update gate_mean_ema (_ecg_gate_ema) for all auto rules including auto_tr;
+            # lam_cur_raw and tail_ratio_est both depend on it. Optional DDP sync.
             if use_lam_auto and model.training:
                 gate_mean = stats.get("gate_mean", 0.0)
                 try:
@@ -3180,6 +3221,19 @@ class trainModel():
                 else:
                     self._ecg_gate_ema = beta * self._ecg_gate_ema + (1.0 - beta) * gate_mean
                 self.ecg_lam = lam_cur  # for epoch-level wandb log
+                # auto_tr: also update gate_p95 and active_frac EMAs (lambda mainly fixed; use ecg_schedule=tau_target for late-stage active_frac collapse, e.g. SVHN)
+                if ecg_lam_rule == "auto_tr":
+                    beta_tr = getattr(self, "ecg_tail_ratio_beta", 0.9)
+                    gate_p95 = stats.get("gate_p95", 0.0)
+                    afrac = stats.get("conf_gate_active_frac", 0.0)
+                    if getattr(self, "_ecg_gate_p95_ema", None) is None:
+                        self._ecg_gate_p95_ema = gate_p95
+                    else:
+                        self._ecg_gate_p95_ema = beta_tr * self._ecg_gate_p95_ema + (1.0 - beta_tr) * gate_p95
+                    if getattr(self, "_ecg_active_frac_ema", None) is None:
+                        self._ecg_active_frac_ema = afrac
+                    else:
+                        self._ecg_active_frac_ema = beta_tr * self._ecg_active_frac_ema + (1.0 - beta_tr) * afrac
             if getattr(self, "use_wandb", False):
                 # Accumulate ECG gate stats (avoid per-batch wandb spam)
                 try:
@@ -5225,7 +5279,9 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
          adv_eps=8, adv_steps=20, adv_restarts=1, adv_pixel=True,
          eval_c_suite=False, c_corruptions='gaussian_noise,brightness', c_severities=5,
          imbalance='none', imb_factor=None, imb_seed=None,
-         ecg_lam_max=1.5, ecg_lam_beta=0.9, ecg_lam_eps=1e-6, seed=None):
+         ecg_lam_max=1.5, ecg_lam_beta=0.9, ecg_lam_eps=1e-6, seed=None,
+         ecg_tail_ratio_target=3.0, ecg_tail_ratio_beta=0.9, ecg_active_frac_floor=0.05,
+         ecg_sparse_lam_decay=0.5, ecg_sparse_lam_zero=False):
     if seed is not None:
         os.environ["TRAIN_DATALOADER_SEED"] = str(seed)  # for DataLoader worker_init_fn (ImageNet etc.)
 
@@ -5242,7 +5298,7 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
     # auto_w = 5-epoch delta warmup; auto_d = auto-delta (reference-based); auto_dw = auto-delta + 5-epoch warmup.
     _lam_start, _lam_end = ecg_lam_start, ecg_lam_end
     _lam_rule = str(_lam_start).strip().lower() if _lam_start else None
-    if _lam_rule in ("auto", "auto_w", "auto_d", "auto_dw"):
+    if _lam_rule in _AUTO_LAM_RULES:
         model_cnn.ecg_lam_rule = _lam_rule
         model_cnn.ecg_lam_delta = float(_lam_end) if (_lam_end is not None and str(_lam_end).strip()) else 0.05
         model_cnn.ecg_lam_max = float(ecg_lam_max)
@@ -5259,6 +5315,16 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
             model_cnn.ecg_auto_d_delta_min = 0.01
             model_cnn.ecg_auto_d_delta_max = 0.20
             model_cnn.ecg_auto_d_warmup_epochs = 5
+        if _lam_rule == "auto_tr":
+            if float(ecg_lam_max) == 1.5:
+                model_cnn.ecg_lam_max = 0.8
+            model_cnn.ecg_tail_ratio_target = float(ecg_tail_ratio_target)
+            model_cnn.ecg_tail_ratio_beta = float(ecg_tail_ratio_beta)
+            model_cnn.ecg_active_frac_floor = float(ecg_active_frac_floor)
+            model_cnn.ecg_sparse_lam_decay = float(ecg_sparse_lam_decay)
+            model_cnn.ecg_sparse_lam_zero = bool(ecg_sparse_lam_zero)
+            model_cnn._ecg_gate_p95_ema = None
+            model_cnn._ecg_active_frac_ema = None
         _lam_start, _lam_end = None, None
     else:
         model_cnn.ecg_lam_rule = getattr(model_cnn, "ecg_lam_rule", None)
@@ -5465,6 +5531,17 @@ if __name__ == '__main__':
                         help="Deadzone for tau_target updates. If |active_frac-target|<deadzone, do not update tau.")
     parser.add_argument("--ecg_tau_min", type=float, default=0.0)
     parser.add_argument("--ecg_tau_max", type=float, default=0.99)
+    # ---- tail-ratio auto-lambda (auto_tr) ----
+    parser.add_argument("--ecg_tail_ratio_target", type=float, default=3.0,
+                        help="Target tail amplification ratio (1+lam*g_p95)/(1+lam*g_mean) for auto_tr.")
+    parser.add_argument("--ecg_tail_ratio_beta", type=float, default=0.9,
+                        help="EMA beta for gate_p95 and active_frac tracking in auto_tr.")
+    parser.add_argument("--ecg_active_frac_floor", type=float, default=0.05,
+                        help="Sparse-gate guard: if active_frac_ema < this, reduce lambda.")
+    parser.add_argument("--ecg_sparse_lam_decay", type=float, default=0.5,
+                        help="Multiply lambda by this factor when sparse-gate guard fires.")
+    parser.add_argument("--ecg_sparse_lam_zero", type=str2bool, default=False,
+                        help="If True, set lambda=0 (instead of decay) when sparse-gate guard fires.")
 
     # ---- runtime diagnostics ----
     parser.add_argument("--log_runtime", type=str2bool, default=True)
@@ -5698,7 +5775,7 @@ if __name__ == "__main__":
             if args.ecg_schedule in ["linear", "cosine"]:
                 _ls = getattr(args, "ecg_lam_start", None)
                 _ls_lower = str(_ls).strip().lower() if _ls else ""
-                if _ls_lower in ("auto", "auto_w", "auto_d", "auto_dw"):
+                if _ls_lower in _AUTO_LAM_RULES:
                     lam_part = f"lam_{_ls_lower}{args.ecg_lam_end or '0.05'}"
                 else:
                     lam_s = _ls if _ls is not None else args.ecg_lam
@@ -5810,4 +5887,7 @@ if __name__ == "__main__":
         getattr(args, "imb_seed", None),
         getattr(args, "ecg_lam_max", 1.5), getattr(args, "ecg_lam_beta", 0.9), getattr(args, "ecg_lam_eps", 1e-6),
         getattr(args, "seed", 0),
+        getattr(args, "ecg_tail_ratio_target", 3.0), getattr(args, "ecg_tail_ratio_beta", 0.9),
+        getattr(args, "ecg_active_frac_floor", 0.05), getattr(args, "ecg_sparse_lam_decay", 0.5),
+        getattr(args, "ecg_sparse_lam_zero", False),
     )

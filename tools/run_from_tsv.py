@@ -398,6 +398,12 @@ def main() -> None:
     _add_arg(cmd, "--ecg_lam_max", hp, "ecg_lam_max")
     _add_arg(cmd, "--ecg_lam_beta", hp, "ecg_lam_beta")
     _add_arg(cmd, "--ecg_lam_eps", hp, "ecg_lam_eps")
+    # tail-ratio auto_tr (optional when ecg_lam_start=auto_tr)
+    _add_arg(cmd, "--ecg_tail_ratio_target", hp, "ecg_tail_ratio_target")
+    _add_arg(cmd, "--ecg_tail_ratio_beta", hp, "ecg_tail_ratio_beta")
+    _add_arg(cmd, "--ecg_active_frac_floor", hp, "ecg_active_frac_floor")
+    _add_arg(cmd, "--ecg_sparse_lam_decay", hp, "ecg_sparse_lam_decay")
+    _add_arg(cmd, "--ecg_sparse_lam_zero", hp, "ecg_sparse_lam_zero")
 
     # ---- suites / long-tail / demo dump (optional) ----
     _add_arg(cmd, "--eval_extra_every", hp, "eval_extra_every")
