@@ -2147,10 +2147,7 @@ class trainModel():
                     'optimizer' : opt.state_dict(),}, ckptName, counter)
 
 
-        stage2_lr_scale = float(getattr(self, "stage2_lr_scale", 0.1))
-        for pg in opt.param_groups:
-            pg['lr'] = pg['lr'] * stage2_lr_scale
-        print(f"[STAGE2] lr scaled by {stage2_lr_scale} -> {opt.param_groups[0]['lr']}", flush=True)
+        print(f"[STAGE2] lr = {opt.param_groups[0]['lr']} (unchanged from stage1)", flush=True)
 
         write_pred_logs = True
 
