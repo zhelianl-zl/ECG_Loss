@@ -404,6 +404,8 @@ def main() -> None:
     _add_arg(cmd, "--ecg_active_frac_floor", hp, "ecg_active_frac_floor")
     _add_arg(cmd, "--ecg_sparse_lam_decay", hp, "ecg_sparse_lam_decay")
     _add_arg(cmd, "--ecg_sparse_lam_zero", hp, "ecg_sparse_lam_zero")
+    _add_arg(cmd, "--ecg_tail_lam_ema", hp, "ecg_tail_lam_ema")
+    _add_arg(cmd, "--ecg_tail_invalid_decay", hp, "ecg_tail_invalid_decay")
 
     # ---- suites / long-tail / demo dump (optional) ----
     _add_arg(cmd, "--eval_extra_every", hp, "eval_extra_every")
