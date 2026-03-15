@@ -61,9 +61,21 @@ def ecg_loss(logits, targets, lam=1.0, tau=0.7, k=10.0, conf_type="pmax", detach
     loss = F.cross_entropy(scaled_logits, targets)
 
     # gate_mean from detached gate (for auto-lambda EMA; avoid graph retention)
-    gate_mean_val = gate.detach().mean().item()
+    g_flat = gate.detach().float().view(-1)
+    gate_mean_val = g_flat.mean().item()
+    if g_flat.numel() <= 1:
+        gate_p95_val = g_flat.item() if g_flat.numel() == 1 else 0.0
+        gate_p99_val = gate_p95_val
+        gate_std_val = 0.0
+    else:
+        gate_p95_val = torch.quantile(g_flat, 0.95).item()
+        gate_p99_val = torch.quantile(g_flat, 0.99).item()
+        gate_std_val = g_flat.std().item()
     stats = {
         "gate_mean": gate_mean_val,
+        "gate_p95": gate_p95_val,
+        "gate_p99": gate_p99_val,
+        "gate_std": gate_std_val,
         "wrong_mean": wrong_gate.mean().item(),
         "conf_mean": conf.mean().item(),
         "conf_gate_mean": conf_gate.mean().item(),
