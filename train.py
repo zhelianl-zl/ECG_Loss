@@ -5522,7 +5522,7 @@ if __name__ == '__main__':
     parser.add_argument("--ecg_lam", type=float, default=1.0)
     parser.add_argument("--ecg_tau", type=float, default=0.7)
     parser.add_argument("--ecg_k", type=float, default=10.0)
-    parser.add_argument("--ecg_conf_type", type=str, default="pmax", choices=["pmax", "1-pe", "none"])
+    parser.add_argument("--ecg_conf_type", type=str, default="pmax", choices=["pmax", "margin", "1-pe", "none"])
     parser.add_argument("--ecg_detach_gates", type=str2bool, default=True)
     parser.add_argument("--ecg_schedule", type=str, default="none", choices=["none", "linear", "cosine", "adaptive", "tau_target"])
     parser.add_argument("--ecg_lam_start", type=str, default=None,

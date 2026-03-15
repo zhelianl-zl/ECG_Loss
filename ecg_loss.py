@@ -39,6 +39,12 @@ def ecg_loss(logits, targets, lam=1.0, tau=0.7, k=10.0, conf_type="pmax", detach
         if tau_quantile is not None:
             tau = torch.quantile(conf.detach(), float(tau_quantile))
         conf_gate = torch.sigmoid(k * (conf - tau))
+    elif conf_type == "margin":
+        top2 = torch.topk(p, k=2, dim=1).values
+        conf = top2[:, 0] - top2[:, 1]
+        if tau_quantile is not None:
+            tau = torch.quantile(conf.detach(), float(tau_quantile))
+        conf_gate = torch.sigmoid(k * (conf - tau))
     elif conf_type == "none":
         conf = torch.ones_like(py)  # dummy for logging
         conf_gate = torch.ones_like(py)
@@ -115,6 +121,10 @@ def ecg_gates(logits, targets, lam=1.0, tau=0.7, k=10.0, conf_type="pmax", detac
     if conf_type == "pmax":
         conf = p.max(dim=1).values
         conf_gate = torch.sigmoid(k * (conf - tau))
+    elif conf_type == "margin":
+        top2p = torch.topk(p, k=2, dim=1).values
+        conf = top2p[:, 0] - top2p[:, 1]
+        conf_gate = torch.sigmoid(k * (conf - tau))
     elif conf_type == "1-pe":
         pe = -(p * (p.clamp_min(eps)).log()).sum(dim=1)
         pe_norm = pe / math.log(C)
@@ -134,9 +144,9 @@ def ecg_gates(logits, targets, lam=1.0, tau=0.7, k=10.0, conf_type="pmax", detac
     gate = wrong_gate * conf_gate
     scale = (1.0 + lam * gate)
 
-    # margin (top1 - top2 logit)
-    top2 = torch.topk(logits, k=2, dim=1).values
-    margin = top2[:, 0] - top2[:, 1]
+    # probability margin (top1 - top2 prob)
+    top2p = torch.topk(p, k=2, dim=1).values
+    margin = top2p[:, 0] - top2p[:, 1]
 
     return {
         "py": py.detach(),
