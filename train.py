@@ -5364,8 +5364,6 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
             model_cnn.ecg_auto_d_delta_max = 0.20
             model_cnn.ecg_auto_d_warmup_epochs = 5
         if _lam_rule in ("auto_tr", "auto_tr_sustain"):
-            if float(ecg_lam_max) == 1.5:
-                model_cnn.ecg_lam_max = 0.8
             model_cnn.ecg_tail_ratio_target = float(ecg_tail_ratio_target)
             model_cnn.ecg_tail_ratio_beta = float(ecg_tail_ratio_beta)
             model_cnn.ecg_active_frac_floor = float(ecg_active_frac_floor)
