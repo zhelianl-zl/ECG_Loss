@@ -1702,16 +1702,17 @@ class trainModel():
                         to_log["ECG/delta_eff"] = float(delta * min(1.0, global_epoch / 5.0))
                     if getattr(self, "ecg_lam_rule", None) == "auto_tr":
                         to_log["ECG/gate_mean_ema"] = float(getattr(self, "_ecg_gate_ema", 0.0))
-                        to_log["ECG/gate_p95_ema"] = float(getattr(self, "_ecg_gate_p95_ema", 0.0))
+                        to_log["ECG/gate_p99_ema"] = float(getattr(self, "_ecg_gate_p99_ema", 0.0))
                         to_log["ECG/conf_gate_active_frac_ema"] = float(getattr(self, "_ecg_active_frac_ema", 0.0))
-                        to_log["ECG/lam_auto_raw"] = float(getattr(self, "_ecg_lam_auto_raw", 0.0))
+                        to_log["ECG/lam_auto_raw_target"] = float(getattr(self, "_ecg_lam_auto_raw", 0.0))
+                        to_log["ECG/lam_auto_smoothed"] = float(getattr(self, "_ecg_lam_auto_smoothed", 0.0))
                         to_log["ECG/lam_auto_after_guard"] = float(getattr(self, "_ecg_lam_auto_after_guard", 0.0))
                         to_log["ECG/tail_ratio_target"] = float(getattr(self, "ecg_tail_ratio_target", 3.0))
                         lam_cur = float(getattr(self, "ecg_lam", 0.0))
                         gme = float(getattr(self, "_ecg_gate_ema", 0.0))
-                        g95 = float(getattr(self, "_ecg_gate_p95_ema", 0.0))
+                        g99 = float(getattr(self, "_ecg_gate_p99_ema", 0.0))
                         if gme > 1e-12:
-                            to_log["ECG/tail_ratio_est"] = (1.0 + lam_cur * g95) / (1.0 + lam_cur * gme)
+                            to_log["ECG/tail_ratio_est"] = (1.0 + lam_cur * g99) / (1.0 + lam_cur * gme)
                         else:
                             to_log["ECG/tail_ratio_est"] = 0.0
                     # auto_d/auto_dw: delta_cur, delta_eff, scale_p99_ema logged only at epoch end
@@ -2140,9 +2141,10 @@ class trainModel():
                     'optimizer' : opt.state_dict(),}, ckptName, counter)
 
 
-        #opt = optim.Adam(model.parameters(), lr=lr/10.0)
-
-        print(f"[STAGE2] lr = {opt.param_groups[0]['lr']} (unchanged from stage1)", flush=True)
+        stage2_lr_scale = float(getattr(self, "stage2_lr_scale", 0.1))
+        for pg in opt.param_groups:
+            pg['lr'] = pg['lr'] * stage2_lr_scale
+        print(f"[STAGE2] lr scaled by {stage2_lr_scale} -> {opt.param_groups[0]['lr']}", flush=True)
 
         write_pred_logs = True
 
@@ -3138,28 +3140,38 @@ class trainModel():
                     delta_eff = getattr(self, "_ecg_delta_eff", delta) * min(1.0, cur_epoch / warmup_epochs)
                 elif ecg_lam_rule == "auto_tr":
                     mean_g = getattr(self, "_ecg_gate_ema", None)
-                    hi_g = getattr(self, "_ecg_gate_p95_ema", None)
+                    hi_g = getattr(self, "_ecg_gate_p99_ema", None)
                     r = float(getattr(self, "ecg_tail_ratio_target", 3.0))
+                    prev_smooth = getattr(self, "_ecg_lam_auto_tr_ema", None)
                     if mean_g is None or hi_g is None:
-                        lam_cur = 0.0
+                        lam_target = 0.0
                         self._ecg_lam_auto_raw = 0.0
-                        self._ecg_lam_auto_after_guard = 0.0
                     else:
                         denom = hi_g - r * mean_g
                         if denom <= 1e-8:
-                            lam_cur_raw = 0.0
+                            inv_decay = float(getattr(self, "ecg_tail_invalid_decay", 0.95))
+                            lam_target = (prev_smooth * inv_decay) if prev_smooth is not None else 0.0
                         else:
-                            lam_cur_raw = (r - 1.0) / denom
-                        lam_cur = min(lam_max, max(0.0, lam_cur_raw))
-                        self._ecg_lam_auto_raw = lam_cur_raw
-                        afrac = getattr(self, "_ecg_active_frac_ema", None)
-                        floor = float(getattr(self, "ecg_active_frac_floor", 0.05))
-                        if afrac is not None and afrac < floor:
-                            if getattr(self, "ecg_sparse_lam_zero", False):
-                                lam_cur = 0.0
-                            else:
-                                lam_cur *= float(getattr(self, "ecg_sparse_lam_decay", 0.5))
-                        self._ecg_lam_auto_after_guard = lam_cur
+                            lam_target = (r - 1.0) / denom
+                        lam_target = min(lam_max, max(0.0, lam_target))
+                        self._ecg_lam_auto_raw = lam_target
+                    lam_beta = float(getattr(self, "ecg_tail_lam_ema", 0.9))
+                    if prev_smooth is None or lam_beta <= 0.0:
+                        lam_smooth = lam_target
+                    else:
+                        lam_smooth = lam_beta * prev_smooth + (1.0 - lam_beta) * lam_target
+                    lam_smooth = min(lam_max, max(0.0, lam_smooth))
+                    self._ecg_lam_auto_tr_ema = lam_smooth
+                    self._ecg_lam_auto_smoothed = lam_smooth
+                    lam_cur = lam_smooth
+                    afrac = getattr(self, "_ecg_active_frac_ema", None)
+                    floor = float(getattr(self, "ecg_active_frac_floor", 0.05))
+                    if afrac is not None and afrac < floor:
+                        if getattr(self, "ecg_sparse_lam_zero", False):
+                            lam_cur = 0.0
+                        else:
+                            lam_cur *= float(getattr(self, "ecg_sparse_lam_decay", 0.5))
+                    self._ecg_lam_auto_after_guard = lam_cur
                 else:
                     delta_eff = delta
                 if ecg_lam_rule != "auto_tr":
@@ -3221,15 +3233,19 @@ class trainModel():
                 else:
                     self._ecg_gate_ema = beta * self._ecg_gate_ema + (1.0 - beta) * gate_mean
                 self.ecg_lam = lam_cur  # for epoch-level wandb log
-                # auto_tr: also update gate_p95 and active_frac EMAs (lambda mainly fixed; use ecg_schedule=tau_target for late-stage active_frac collapse, e.g. SVHN)
                 if ecg_lam_rule == "auto_tr":
                     beta_tr = getattr(self, "ecg_tail_ratio_beta", 0.9)
                     gate_p95 = stats.get("gate_p95", 0.0)
+                    gate_p99 = stats.get("gate_p99", 0.0)
                     afrac = stats.get("conf_gate_active_frac", 0.0)
                     if getattr(self, "_ecg_gate_p95_ema", None) is None:
                         self._ecg_gate_p95_ema = gate_p95
                     else:
                         self._ecg_gate_p95_ema = beta_tr * self._ecg_gate_p95_ema + (1.0 - beta_tr) * gate_p95
+                    if getattr(self, "_ecg_gate_p99_ema", None) is None:
+                        self._ecg_gate_p99_ema = gate_p99
+                    else:
+                        self._ecg_gate_p99_ema = beta_tr * self._ecg_gate_p99_ema + (1.0 - beta_tr) * gate_p99
                     if getattr(self, "_ecg_active_frac_ema", None) is None:
                         self._ecg_active_frac_ema = afrac
                     else:
@@ -5281,7 +5297,8 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
          imbalance='none', imb_factor=None, imb_seed=None,
          ecg_lam_max=1.5, ecg_lam_beta=0.9, ecg_lam_eps=1e-6, seed=None,
          ecg_tail_ratio_target=3.0, ecg_tail_ratio_beta=0.9, ecg_active_frac_floor=0.05,
-         ecg_sparse_lam_decay=0.5, ecg_sparse_lam_zero=False):
+         ecg_sparse_lam_decay=0.5, ecg_sparse_lam_zero=False,
+         ecg_tail_lam_ema=0.9, ecg_tail_invalid_decay=0.95):
     if seed is not None:
         os.environ["TRAIN_DATALOADER_SEED"] = str(seed)  # for DataLoader worker_init_fn (ImageNet etc.)
 
@@ -5323,8 +5340,12 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
             model_cnn.ecg_active_frac_floor = float(ecg_active_frac_floor)
             model_cnn.ecg_sparse_lam_decay = float(ecg_sparse_lam_decay)
             model_cnn.ecg_sparse_lam_zero = bool(ecg_sparse_lam_zero)
+            model_cnn.ecg_tail_lam_ema = float(ecg_tail_lam_ema)
+            model_cnn.ecg_tail_invalid_decay = float(ecg_tail_invalid_decay)
             model_cnn._ecg_gate_p95_ema = None
+            model_cnn._ecg_gate_p99_ema = None
             model_cnn._ecg_active_frac_ema = None
+            model_cnn._ecg_lam_auto_tr_ema = None
         _lam_start, _lam_end = None, None
     else:
         model_cnn.ecg_lam_rule = getattr(model_cnn, "ecg_lam_rule", None)
@@ -5533,15 +5554,19 @@ if __name__ == '__main__':
     parser.add_argument("--ecg_tau_max", type=float, default=0.99)
     # ---- tail-ratio auto-lambda (auto_tr) ----
     parser.add_argument("--ecg_tail_ratio_target", type=float, default=3.0,
-                        help="Target tail amplification ratio (1+lam*g_p95)/(1+lam*g_mean) for auto_tr.")
+                        help="Target tail amplification ratio (1+lam*g_p99)/(1+lam*g_mean) for auto_tr.")
     parser.add_argument("--ecg_tail_ratio_beta", type=float, default=0.9,
-                        help="EMA beta for gate_p95 and active_frac tracking in auto_tr.")
+                        help="EMA beta for gate_p99 and active_frac tracking in auto_tr.")
     parser.add_argument("--ecg_active_frac_floor", type=float, default=0.05,
                         help="Sparse-gate guard: if active_frac_ema < this, reduce lambda.")
     parser.add_argument("--ecg_sparse_lam_decay", type=float, default=0.5,
                         help="Multiply lambda by this factor when sparse-gate guard fires.")
     parser.add_argument("--ecg_sparse_lam_zero", type=str2bool, default=False,
                         help="If True, set lambda=0 (instead of decay) when sparse-gate guard fires.")
+    parser.add_argument("--ecg_tail_lam_ema", type=float, default=0.9,
+                        help="EMA beta for smoothing lambda over time in auto_tr (0=no smoothing).")
+    parser.add_argument("--ecg_tail_invalid_decay", type=float, default=0.95,
+                        help="When tail-ratio denom is invalid, decay previous smoothed lam by this factor.")
 
     # ---- runtime diagnostics ----
     parser.add_argument("--log_runtime", type=str2bool, default=True)
@@ -5890,4 +5915,5 @@ if __name__ == "__main__":
         getattr(args, "ecg_tail_ratio_target", 3.0), getattr(args, "ecg_tail_ratio_beta", 0.9),
         getattr(args, "ecg_active_frac_floor", 0.05), getattr(args, "ecg_sparse_lam_decay", 0.5),
         getattr(args, "ecg_sparse_lam_zero", False),
+        getattr(args, "ecg_tail_lam_ema", 0.9), getattr(args, "ecg_tail_invalid_decay", 0.95),
     )
