@@ -73,7 +73,7 @@ from cals import AugLagrangian, AugLagrangianClass
 
 from ecg_loss import ecg_loss
 LOSS_ECG = "ecg"
-_AUTO_LAM_RULES = ("auto", "auto_w", "auto_d", "auto_dw", "auto_tr", "auto_tr_sustain")
+_AUTO_LAM_RULES = ("auto", "auto_w", "auto_d", "auto_dw", "auto_tr", "auto_tr_sustain", "auto_tr_autocap")
 
 # --- PE mode switches ---
 PE_MODE = "raw"          # "raw" | "logk" | "logk_rms" | "none" (none/raw = no PE norm)
@@ -1700,7 +1700,7 @@ class trainModel():
                     if getattr(self, "ecg_lam_rule", None) == "auto_w":
                         delta = getattr(self, "ecg_lam_delta", 0.05)
                         to_log["ECG/delta_eff"] = float(delta * min(1.0, global_epoch / 5.0))
-                    if getattr(self, "ecg_lam_rule", None) in ("auto_tr", "auto_tr_sustain"):
+                    if getattr(self, "ecg_lam_rule", None) in ("auto_tr", "auto_tr_sustain", "auto_tr_autocap"):
                         to_log["ECG/gate_mean_ema"] = float(getattr(self, "_ecg_gate_ema", 0.0))
                         to_log["ECG/gate_p99_ema"] = float(getattr(self, "_ecg_gate_p99_ema", 0.0))
                         to_log["ECG/conf_gate_active_frac_ema"] = float(getattr(self, "_ecg_active_frac_ema", 0.0))
@@ -1715,12 +1715,20 @@ class trainModel():
                             to_log["ECG/tail_ratio_est"] = (1.0 + lam_cur * g99) / (1.0 + lam_cur * gme)
                         else:
                             to_log["ECG/tail_ratio_est"] = 0.0
-                    if getattr(self, "ecg_lam_rule", None) == "auto_tr_sustain":
+                    if getattr(self, "ecg_lam_rule", None) in ("auto_tr_sustain", "auto_tr_autocap"):
                         to_log["ECG/scale_p99_ema"] = float(getattr(self, "_ecg_scale_p99_ema_tr", 0.0))
                         to_log["ECG/lam_auto_base"] = float(getattr(self, "_ecg_lam_auto_smoothed", 0.0))
                         to_log["ECG/lam_sustain_target"] = float(getattr(self, "_ecg_lam_sustain_target", 0.0))
                         to_log["ECG/lam_sustain_ema"] = float(getattr(self, "_ecg_lam_sustain_ema", 0.0))
                         to_log["ECG/lam_auto_after_sustain"] = float(getattr(self, "_ecg_lam_auto_after_guard", 0.0))
+                    if getattr(self, "ecg_lam_rule", None) == "auto_tr_autocap":
+                        to_log["ECG/lam_cap_cur"] = float(getattr(self, "_ecg_lam_cap_cur", 0.0))
+                        to_log["ECG/lam_cap_min"] = float(getattr(self, "_ecg_lam_cap_min", 0.0))
+                        to_log["ECG/lam_cap_hit_ema"] = float(getattr(self, "_ecg_lam_cap_hit_ema", 0.0))
+                        to_log["ECG/lam_inner_before_cap"] = float(getattr(self, "_ecg_lam_inner_before_cap", 0.0))
+                        to_log["ECG/lam_auto_after_cap"] = float(getattr(self, "ecg_lam", 0.0))
+                        to_log["ECG/cap_up_pressure"] = float(getattr(self, "_ecg_cap_up_pressure", 0.0))
+                        to_log["ECG/cap_down_pressure"] = float(getattr(self, "_ecg_cap_down_pressure", 0.0))
                     # auto_d/auto_dw: delta_cur, delta_eff, scale_p99_ema logged only at epoch end
                 wandb.log(to_log, step=int(global_epoch))
         except Exception:
@@ -3141,7 +3149,7 @@ class trainModel():
                 elif ecg_lam_rule == "auto_dw":
                     warmup_epochs = getattr(self, "ecg_auto_d_warmup_epochs", 5)
                     delta_eff = getattr(self, "_ecg_delta_eff", delta) * min(1.0, cur_epoch / warmup_epochs)
-                elif ecg_lam_rule in ("auto_tr", "auto_tr_sustain"):
+                elif ecg_lam_rule in ("auto_tr", "auto_tr_sustain", "auto_tr_autocap"):
                     mean_g = getattr(self, "_ecg_gate_ema", None)
                     hi_g = getattr(self, "_ecg_gate_p99_ema", None)
                     r = float(getattr(self, "ecg_tail_ratio_target", 3.0))
@@ -3167,9 +3175,9 @@ class trainModel():
                     self._ecg_lam_auto_tr_ema = lam_smooth
                     self._ecg_lam_auto_smoothed = lam_smooth
                     lam_base = lam_smooth
-                    # auto_tr_sustain: additive sustain floor from scale_p99_after_norm
+                    # auto_tr_sustain / auto_tr_autocap: additive sustain floor
                     self._ecg_lam_sustain_target = 0.0
-                    if ecg_lam_rule == "auto_tr_sustain":
+                    if ecg_lam_rule in ("auto_tr_sustain", "auto_tr_autocap"):
                         _SUSTAIN_TARGET_FLOOR = 1.08
                         _SUSTAIN_FRAC = 0.25
                         _SUSTAIN_BETA = 0.95
@@ -3186,9 +3194,48 @@ class trainModel():
                         prev_sustain = getattr(self, "_ecg_lam_sustain_ema", 0.0)
                         sustain_val = _SUSTAIN_BETA * prev_sustain + (1.0 - _SUSTAIN_BETA) * sustain_tgt
                         self._ecg_lam_sustain_ema = sustain_val
-                        lam_cur = min(lam_max, max(lam_base, sustain_val))
+                        lam_inner = min(lam_max, max(lam_base, sustain_val))
                     else:
-                        lam_cur = lam_base
+                        lam_inner = lam_base
+                    # auto_tr_autocap: dynamic runtime cap
+                    self._ecg_cap_up_pressure = 0.0
+                    self._ecg_cap_down_pressure = 0.0
+                    if ecg_lam_rule == "auto_tr_autocap":
+                        _CAP_SCALE_LOW = 1.08
+                        _CAP_SCALE_HIGH = 1.18
+                        _CAP_UP_RATE = 0.05
+                        _CAP_DOWN_RATE = 0.08
+                        _CAP_HIT_BETA = 0.95
+                        cap_cur = getattr(self, "_ecg_lam_cap_cur", min(lam_max, 1.0))
+                        cap_min = getattr(self, "_ecg_lam_cap_min", min(0.8, lam_max))
+                        cap_hit = 1.0 if lam_inner >= 0.98 * cap_cur else 0.0
+                        prev_hit_ema = getattr(self, "_ecg_lam_cap_hit_ema", 0.0)
+                        self._ecg_lam_cap_hit_ema = _CAP_HIT_BETA * prev_hit_ema + (1.0 - _CAP_HIT_BETA) * cap_hit
+                        s_ema_c = getattr(self, "_ecg_scale_p99_ema_tr", None)
+                        afrac_c = getattr(self, "_ecg_active_frac_ema", None)
+                        floor_c = float(getattr(self, "ecg_active_frac_floor", 0.05))
+                        up_pressure = 0.0
+                        down_pressure = 0.0
+                        if s_ema_c is not None:
+                            if s_ema_c > _CAP_SCALE_HIGH:
+                                scale_excess = min(1.0, max(0.0, (s_ema_c - _CAP_SCALE_HIGH) / max(_CAP_SCALE_HIGH - 1.0, 1e-8)))
+                                down_pressure = max(down_pressure, scale_excess)
+                            if s_ema_c < _CAP_SCALE_LOW and self._ecg_lam_cap_hit_ema > 0.3 and afrac_c is not None and afrac_c >= floor_c:
+                                scale_deficit = min(1.0, max(0.0, (_CAP_SCALE_LOW - s_ema_c) / max(_CAP_SCALE_LOW - 1.0, 1e-8)))
+                                up_pressure = scale_deficit * self._ecg_lam_cap_hit_ema
+                        if afrac_c is not None and afrac_c < floor_c:
+                            active_bad = min(1.0, max(0.0, (floor_c - afrac_c) / max(floor_c, 1e-8)))
+                            down_pressure = max(down_pressure, active_bad)
+                        self._ecg_cap_up_pressure = up_pressure
+                        self._ecg_cap_down_pressure = down_pressure
+                        cap_cur += _CAP_UP_RATE * (lam_max - cap_cur) * up_pressure
+                        cap_cur -= _CAP_DOWN_RATE * (cap_cur - cap_min) * down_pressure
+                        cap_cur = min(lam_max, max(cap_min, cap_cur))
+                        self._ecg_lam_cap_cur = cap_cur
+                        self._ecg_lam_inner_before_cap = lam_inner
+                        lam_cur = min(lam_inner, cap_cur)
+                    else:
+                        lam_cur = lam_inner
                     afrac = getattr(self, "_ecg_active_frac_ema", None)
                     floor = float(getattr(self, "ecg_active_frac_floor", 0.05))
                     if afrac is not None and afrac < floor:
@@ -3199,7 +3246,7 @@ class trainModel():
                     self._ecg_lam_auto_after_guard = lam_cur
                 else:
                     delta_eff = delta
-                if ecg_lam_rule not in ("auto_tr", "auto_tr_sustain"):
+                if ecg_lam_rule not in ("auto_tr", "auto_tr_sustain", "auto_tr_autocap"):
                     if gate_ema is None:
                         lam_cur = lam_max
                     else:
@@ -3258,7 +3305,7 @@ class trainModel():
                 else:
                     self._ecg_gate_ema = beta * self._ecg_gate_ema + (1.0 - beta) * gate_mean
                 self.ecg_lam = lam_cur  # for epoch-level wandb log
-                if ecg_lam_rule in ("auto_tr", "auto_tr_sustain"):
+                if ecg_lam_rule in ("auto_tr", "auto_tr_sustain", "auto_tr_autocap"):
                     beta_tr = getattr(self, "ecg_tail_ratio_beta", 0.9)
                     gate_p95 = stats.get("gate_p95", 0.0)
                     gate_p99 = stats.get("gate_p99", 0.0)
@@ -3275,7 +3322,7 @@ class trainModel():
                         self._ecg_active_frac_ema = afrac
                     else:
                         self._ecg_active_frac_ema = beta_tr * self._ecg_active_frac_ema + (1.0 - beta_tr) * afrac
-                    if ecg_lam_rule == "auto_tr_sustain":
+                    if ecg_lam_rule in ("auto_tr_sustain", "auto_tr_autocap"):
                         sp99 = stats.get("scale_p99_after_norm", 0.0)
                         if getattr(self, "_ecg_scale_p99_ema_tr", None) is None:
                             self._ecg_scale_p99_ema_tr = sp99
@@ -5363,7 +5410,7 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
             model_cnn.ecg_auto_d_delta_min = 0.01
             model_cnn.ecg_auto_d_delta_max = 0.20
             model_cnn.ecg_auto_d_warmup_epochs = 5
-        if _lam_rule in ("auto_tr", "auto_tr_sustain"):
+        if _lam_rule in ("auto_tr", "auto_tr_sustain", "auto_tr_autocap"):
             model_cnn.ecg_tail_ratio_target = float(ecg_tail_ratio_target)
             model_cnn.ecg_tail_ratio_beta = float(ecg_tail_ratio_beta)
             model_cnn.ecg_active_frac_floor = float(ecg_active_frac_floor)
@@ -5375,9 +5422,14 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
             model_cnn._ecg_gate_p99_ema = None
             model_cnn._ecg_active_frac_ema = None
             model_cnn._ecg_lam_auto_tr_ema = None
-            if _lam_rule == "auto_tr_sustain":
+            if _lam_rule in ("auto_tr_sustain", "auto_tr_autocap"):
                 model_cnn._ecg_scale_p99_ema_tr = None
                 model_cnn._ecg_lam_sustain_ema = 0.0
+            if _lam_rule == "auto_tr_autocap":
+                _lm = float(ecg_lam_max)
+                model_cnn._ecg_lam_cap_cur = min(_lm, 1.0)
+                model_cnn._ecg_lam_cap_min = min(0.8, _lm)
+                model_cnn._ecg_lam_cap_hit_ema = 0.0
         _lam_start, _lam_end = None, None
     else:
         model_cnn.ecg_lam_rule = getattr(model_cnn, "ecg_lam_rule", None)
