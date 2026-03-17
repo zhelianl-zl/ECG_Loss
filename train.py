@@ -1694,6 +1694,8 @@ class trainModel():
                     "ECG/schedule_progress": float(self._ecg_schedule_progress(global_epoch)),
                     "ECG/schedule": str(sched),
                 }
+                if getattr(self, "ecg_conf_type", "pmax") == "pmax_temp":
+                    to_log["ECG/ecg_gate_temp"] = float(getattr(self, "ecg_gate_temp", 1.5))
                 if getattr(self, "ecg_lam_rule", None) in _AUTO_LAM_RULES:
                     to_log["ECG/gate_ema"] = float(getattr(self, "_ecg_gate_ema", 0.0))
                     to_log["ECG/lam_auto"] = float(getattr(self, "ecg_lam", 0.0))
@@ -3272,6 +3274,7 @@ class trainModel():
                     detach_gates=getattr(self, "ecg_detach_gates", True),
                     tau_quantile=tau_q,
                     scale_normalize=use_lam_auto,
+                    gate_temp=getattr(self, "ecg_gate_temp", 1.5),
                 )
             elif ecg_tau_rule == "auto_q":
                 tau_q = getattr(self, "ecg_tau_quantile_cur", getattr(self, "ecg_tau_q_start", 0.6))
@@ -3299,6 +3302,7 @@ class trainModel():
                     detach_gates=getattr(self, "ecg_detach_gates", True),
                     tau_quantile=tau_q,
                     scale_normalize=use_lam_auto,
+                    gate_temp=getattr(self, "ecg_gate_temp", 1.5),
                 )
             else:
                 loss, stats = ecg_loss(
@@ -3309,6 +3313,7 @@ class trainModel():
                     conf_type=self.ecg_conf_type,
                     detach_gates=getattr(self, "ecg_detach_gates", True),
                     scale_normalize=use_lam_auto,
+                    gate_temp=getattr(self, "ecg_gate_temp", 1.5),
                 )
             # Auto-lambda: update gate_mean_ema (_ecg_gate_ema) for all auto rules including auto_tr;
             # lam_cur_raw and tail_ratio_est both depend on it. Optional DDP sync.
@@ -5398,7 +5403,8 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
          ecg_lam_max=1.5, ecg_lam_beta=0.9, ecg_lam_eps=1e-6, seed=None,
          ecg_tail_ratio_target=3.0, ecg_tail_ratio_beta=0.9, ecg_active_frac_floor=0.05,
          ecg_sparse_lam_decay=0.5, ecg_sparse_lam_zero=False,
-         ecg_tail_lam_ema=0.9, ecg_tail_invalid_decay=0.95):
+         ecg_tail_lam_ema=0.9, ecg_tail_invalid_decay=0.95,
+         ecg_gate_temp=1.5):
     if seed is not None:
         os.environ["TRAIN_DATALOADER_SEED"] = str(seed)  # for DataLoader worker_init_fn (ImageNet etc.)
 
@@ -5410,6 +5416,7 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
     model_cnn.ecg_tau = float(ecg_tau)
     model_cnn.ecg_k = float(ecg_k)
     model_cnn.ecg_conf_type = str(ecg_conf_type)
+    model_cnn.ecg_gate_temp = float(ecg_gate_temp)
     model_cnn.ecg_detach_gates = bool(ecg_detach_gates)
     # Auto-lambda: ecg_lam_start="auto"|"auto_w"|"auto_d"|"auto_dw" + ecg_lam_end=delta (or initial_delta for auto_d/auto_dw).
     # auto_w = 5-epoch delta warmup; auto_d = auto-delta (reference-based); auto_dw = auto-delta + 5-epoch warmup.
@@ -5630,7 +5637,8 @@ if __name__ == '__main__':
     parser.add_argument("--ecg_lam", type=float, default=1.0)
     parser.add_argument("--ecg_tau", type=float, default=0.7)
     parser.add_argument("--ecg_k", type=float, default=10.0)
-    parser.add_argument("--ecg_conf_type", type=str, default="pmax", choices=["pmax", "margin", "1-pe", "none"])
+    parser.add_argument("--ecg_conf_type", type=str, default="pmax", choices=["pmax", "pmax_temp", "margin", "1-pe", "none"])
+    parser.add_argument("--ecg_gate_temp", type=float, default=1.5, help="Temperature for pmax_temp conf gate (only used when ecg_conf_type=pmax_temp).")
     parser.add_argument("--ecg_detach_gates", type=str2bool, default=True)
     parser.add_argument("--ecg_schedule", type=str, default="none", choices=["none", "linear", "cosine", "adaptive", "tau_target"])
     parser.add_argument("--ecg_lam_start", type=str, default=None,
@@ -6024,4 +6032,5 @@ if __name__ == "__main__":
         getattr(args, "ecg_active_frac_floor", 0.05), getattr(args, "ecg_sparse_lam_decay", 0.5),
         getattr(args, "ecg_sparse_lam_zero", False),
         getattr(args, "ecg_tail_lam_ema", 0.9), getattr(args, "ecg_tail_invalid_decay", 0.95),
+        getattr(args, "ecg_gate_temp", 1.5),
     )

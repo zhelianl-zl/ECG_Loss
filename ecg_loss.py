@@ -14,7 +14,7 @@ class ScaleGrad(torch.autograd.Function):
         return grad_output * scale, None
 
 
-def ecg_loss(logits, targets, lam=1.0, tau=0.7, k=10.0, conf_type="pmax", detach_gates=True, eps=1e-8, tau_quantile=None, scale_normalize=False):
+def ecg_loss(logits, targets, lam=1.0, tau=0.7, k=10.0, conf_type="pmax", detach_gates=True, eps=1e-8, tau_quantile=None, scale_normalize=False, gate_temp=1.5):
     """
     tau_quantile: if set (e.g. 0.8), tau is set to this quantile of conf (pmax) per batch, reducing tau tuning.
     scale_normalize: if True, scale is normalized so mean(scale)=1 (for auto-lambda; keeps global step size unchanged).
@@ -42,6 +42,12 @@ def ecg_loss(logits, targets, lam=1.0, tau=0.7, k=10.0, conf_type="pmax", detach
     elif conf_type == "margin":
         top2 = torch.topk(p, k=2, dim=1).values
         conf = top2[:, 0] - top2[:, 1]
+        if tau_quantile is not None:
+            tau = torch.quantile(conf.detach(), float(tau_quantile))
+        conf_gate = torch.sigmoid(k * (conf - tau))
+    elif conf_type == "pmax_temp":
+        p_gate = F.softmax(logits / max(float(gate_temp), 1e-3), dim=1)
+        conf = p_gate.max(dim=1).values
         if tau_quantile is not None:
             tau = torch.quantile(conf.detach(), float(tau_quantile))
         conf_gate = torch.sigmoid(k * (conf - tau))
@@ -90,6 +96,7 @@ def ecg_loss(logits, targets, lam=1.0, tau=0.7, k=10.0, conf_type="pmax", detach
         "conf_p90": conf_p90_val,
         "conf_p95": conf_p95_val,
         "tau_threshold": float(tau) if not isinstance(tau, torch.Tensor) else tau.item(),
+        "ecg_gate_temp": float(gate_temp) if conf_type == "pmax_temp" else 0.0,
         "conf_gate_mean": conf_gate.mean().item(),
         "conf_gate_active_frac": (conf_gate > 0.5).float().mean().item(),
         "scale_mean": scale.mean().item(),
@@ -109,7 +116,7 @@ def ecg_loss(logits, targets, lam=1.0, tau=0.7, k=10.0, conf_type="pmax", detach
     return loss, stats
 
 
-def ecg_gates(logits, targets, lam=1.0, tau=0.7, k=10.0, conf_type="pmax", detach_gates=True, eps=1e-8):
+def ecg_gates(logits, targets, lam=1.0, tau=0.7, k=10.0, conf_type="pmax", detach_gates=True, eps=1e-8, gate_temp=1.5):
     """
     Compute per-sample gate/scale stats for visualization (no grad needed).
 
@@ -130,6 +137,10 @@ def ecg_gates(logits, targets, lam=1.0, tau=0.7, k=10.0, conf_type="pmax", detac
     elif conf_type == "margin":
         top2p = torch.topk(p, k=2, dim=1).values
         conf = top2p[:, 0] - top2p[:, 1]
+        conf_gate = torch.sigmoid(k * (conf - tau))
+    elif conf_type == "pmax_temp":
+        p_gate = F.softmax(logits / max(float(gate_temp), 1e-3), dim=1)
+        conf = p_gate.max(dim=1).values
         conf_gate = torch.sigmoid(k * (conf - tau))
     elif conf_type == "1-pe":
         pe = -(p * (p.clamp_min(eps)).log()).sum(dim=1)

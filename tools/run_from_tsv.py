@@ -377,6 +377,7 @@ def main() -> None:
     _add_arg(cmd, "--ecg_tau", hp, "ecg_tau")
     _add_arg(cmd, "--ecg_k", hp, "ecg_k")
     _add_arg(cmd, "--ecg_conf_type", hp, "ecg_conf_type")
+    _add_arg(cmd, "--ecg_gate_temp", hp, "ecg_gate_temp")
     _add_arg(cmd, "--ecg_detach_gates", hp, "ecg_detach_gates")
     _add_arg(cmd, "--ecg_schedule", hp, "ecg_schedule")
 
