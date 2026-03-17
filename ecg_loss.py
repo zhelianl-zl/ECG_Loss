@@ -77,6 +77,9 @@ def ecg_loss(logits, targets, lam=1.0, tau=0.7, k=10.0, conf_type="pmax", detach
         gate_p95_val = torch.quantile(g_flat, 0.95).item()
         gate_p99_val = torch.quantile(g_flat, 0.99).item()
         gate_std_val = g_flat.std().item()
+    c_flat = conf.detach().float().view(-1)
+    conf_p90_val = torch.quantile(c_flat, 0.90).item() if c_flat.numel() > 1 else c_flat.mean().item()
+    conf_p95_val = torch.quantile(c_flat, 0.95).item() if c_flat.numel() > 1 else c_flat.mean().item()
     stats = {
         "gate_mean": gate_mean_val,
         "gate_p95": gate_p95_val,
@@ -84,6 +87,9 @@ def ecg_loss(logits, targets, lam=1.0, tau=0.7, k=10.0, conf_type="pmax", detach
         "gate_std": gate_std_val,
         "wrong_mean": wrong_gate.mean().item(),
         "conf_mean": conf.mean().item(),
+        "conf_p90": conf_p90_val,
+        "conf_p95": conf_p95_val,
+        "tau_threshold": float(tau) if not isinstance(tau, torch.Tensor) else tau.item(),
         "conf_gate_mean": conf_gate.mean().item(),
         "conf_gate_active_frac": (conf_gate > 0.5).float().mean().item(),
         "scale_mean": scale.mean().item(),
