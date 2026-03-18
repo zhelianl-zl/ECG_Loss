@@ -52,7 +52,7 @@ def ecg_loss(logits, targets, lam=1.0, tau=0.7, k=10.0, conf_type="pmax", detach
             tau = torch.quantile(conf.detach(), float(tau_quantile))
         conf_gate = torch.sigmoid(k * (conf - tau))
     elif conf_type == "logit_gap_norm":
-        top2_logits = torch.topk(logits.detach(), k=2, dim=1).values
+        top2_logits = torch.topk(logits.detach().float(), k=2, dim=1).values
         raw_gap = top2_logits[:, 0] - top2_logits[:, 1]
         gap_mean = raw_gap.mean()
         gap_std = raw_gap.std(unbiased=False)
@@ -159,7 +159,7 @@ def ecg_gates(logits, targets, lam=1.0, tau=0.7, k=10.0, conf_type="pmax", detac
         conf = 1.0 - pe_norm
         conf_gate = torch.sigmoid(k * (conf - tau))
     elif conf_type == "logit_gap_norm":
-        top2_logits = torch.topk(logits, k=2, dim=1).values
+        top2_logits = torch.topk(logits.float(), k=2, dim=1).values
         raw_gap = top2_logits[:, 0] - top2_logits[:, 1]
         gap_mean = raw_gap.mean()
         gap_std = raw_gap.std(unbiased=False)
