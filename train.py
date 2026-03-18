@@ -5467,12 +5467,18 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
         _lam_start = float(_lam_start) if (_lam_start is not None and str(_lam_start).strip()) else None
         _lam_end = float(_lam_end) if (_lam_end is not None and str(_lam_end).strip()) else None
     # Tau: auto_q (scheduled quantile q), quantile (fixed q), or numeric
-    # auto_q: ecg_tau_start=auto_q, ecg_tau_end=q_start; q_end=0.9 fixed; q(epoch)=linear q_start->q_end
+    # auto_q: ecg_tau_start=auto_q, ecg_tau_end=q_start or q_start_q_end (e.g. 0.6 or 0.6_0.85)
     _tau_start, _tau_end = ecg_tau_start, ecg_tau_end
     if _tau_start is not None and str(_tau_start).strip().lower() == "auto_q":
         model_cnn.ecg_tau_rule = "auto_q"
-        model_cnn.ecg_tau_q_start = float(_tau_end) if (_tau_end is not None and str(_tau_end).strip()) else 0.6
-        model_cnn.ecg_tau_q_end = 0.9  # fixed default
+        _tau_end_str = str(_tau_end).strip() if _tau_end is not None else ""
+        if "_" in _tau_end_str:
+            _qs, _qe = _tau_end_str.split("_", 1)
+            model_cnn.ecg_tau_q_start = float(_qs)
+            model_cnn.ecg_tau_q_end = float(_qe)
+        else:
+            model_cnn.ecg_tau_q_start = float(_tau_end_str) if _tau_end_str else 0.6
+            model_cnn.ecg_tau_q_end = 0.9
         model_cnn.ecg_tau_quantile_cur = float(model_cnn.ecg_tau_q_start)
         _tau_start, _tau_end = None, None
     elif _tau_start is not None and str(_tau_start).strip().lower() in ("quantile", "q"):
@@ -5649,7 +5655,7 @@ if __name__ == '__main__':
     parser.add_argument("--ecg_lam_beta", type=float, default=0.9, help="EMA beta for gate_mean in auto-lambda.")
     parser.add_argument("--ecg_lam_eps", type=float, default=1e-6, help="Eps in lam = delta/(gate_ema+eps) for auto-lambda.")
     parser.add_argument("--ecg_tau_start", type=str, default=None,
-                        help="Start tau, 'quantile'/'q' (fixed q), or 'auto_q' (scheduled q). For quantile: ecg_tau_end=q. For auto_q: ecg_tau_end=q_start (q_end=0.9).")
+                        help="Start tau, 'quantile'/'q' (fixed q), or 'auto_q' (scheduled q). For quantile: ecg_tau_end=q. For auto_q: ecg_tau_end=q_start (q_end defaults to 0.9) or q_start_q_end (e.g. 0.6_0.85).")
     parser.add_argument("--ecg_tau_end", type=str, default=None,
                         help="End tau, or quantile value (e.g. 0.8) when ecg_tau_start=quantile.")
     parser.add_argument("--ecg_k_start", type=float, default=None)
