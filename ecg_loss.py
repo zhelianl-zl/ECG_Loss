@@ -51,6 +51,15 @@ def ecg_loss(logits, targets, lam=1.0, tau=0.7, k=10.0, conf_type="pmax", detach
         if tau_quantile is not None:
             tau = torch.quantile(conf.detach(), float(tau_quantile))
         conf_gate = torch.sigmoid(k * (conf - tau))
+    elif conf_type == "logit_gap_norm":
+        top2_logits = torch.topk(logits.detach(), k=2, dim=1).values
+        raw_gap = top2_logits[:, 0] - top2_logits[:, 1]
+        gap_mean = raw_gap.mean()
+        gap_std = raw_gap.std(unbiased=False)
+        conf = (raw_gap - gap_mean) / (gap_std + 1e-6)
+        if tau_quantile is not None:
+            tau = torch.quantile(conf, float(tau_quantile))
+        conf_gate = torch.sigmoid(k * (conf - tau))
     elif conf_type == "none":
         conf = torch.ones_like(py)  # dummy for logging
         conf_gate = torch.ones_like(py)
@@ -97,6 +106,8 @@ def ecg_loss(logits, targets, lam=1.0, tau=0.7, k=10.0, conf_type="pmax", detach
         "conf_p95": conf_p95_val,
         "tau_threshold": float(tau) if not isinstance(tau, torch.Tensor) else tau.item(),
         "ecg_gate_temp": float(gate_temp) if conf_type == "pmax_temp" else 0.0,
+        "logit_gap_mean": gap_mean.item() if conf_type == "logit_gap_norm" else 0.0,
+        "logit_gap_std": gap_std.item() if conf_type == "logit_gap_norm" else 0.0,
         "conf_gate_mean": conf_gate.mean().item(),
         "conf_gate_active_frac": (conf_gate > 0.5).float().mean().item(),
         "scale_mean": scale.mean().item(),
@@ -146,6 +157,13 @@ def ecg_gates(logits, targets, lam=1.0, tau=0.7, k=10.0, conf_type="pmax", detac
         pe = -(p * (p.clamp_min(eps)).log()).sum(dim=1)
         pe_norm = pe / math.log(C)
         conf = 1.0 - pe_norm
+        conf_gate = torch.sigmoid(k * (conf - tau))
+    elif conf_type == "logit_gap_norm":
+        top2_logits = torch.topk(logits, k=2, dim=1).values
+        raw_gap = top2_logits[:, 0] - top2_logits[:, 1]
+        gap_mean = raw_gap.mean()
+        gap_std = raw_gap.std(unbiased=False)
+        conf = (raw_gap - gap_mean) / (gap_std + 1e-6)
         conf_gate = torch.sigmoid(k * (conf - tau))
     elif conf_type == "none":
         conf = torch.ones_like(py)
