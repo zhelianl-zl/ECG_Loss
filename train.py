@@ -5933,7 +5933,8 @@ if __name__ == "__main__":
                 if _ts_lower in ("quantile", "q"):
                     tau_part = f"tauq{args.ecg_tau_end or '0.8'}"
                 elif _ts_lower == "auto_q":
-                    tau_part = f"tau_autoq{args.ecg_tau_end or '0.6'}"
+                    _aq = str(args.ecg_tau_end or '0.6').replace("_", "-")
+                    tau_part = f"tau_autoq{_aq}"
                 else:
                     tau_s = _ts if _ts is not None else args.ecg_tau
                     tau_e = args.ecg_tau_end if args.ecg_tau_end is not None else args.ecg_tau
@@ -5952,7 +5953,8 @@ if __name__ == "__main__":
             if _ts_lower in ("quantile", "q"):
                 tau_disp = f"tauq{args.ecg_tau_end or '0.8'}"
             elif _ts_lower == "auto_q":
-                tau_disp = f"tau_autoq{args.ecg_tau_end or '0.6'}"
+                _aq = str(args.ecg_tau_end or '0.6').replace("_", "-")
+                tau_disp = f"tau_autoq{_aq}"
             else:
                 tau_disp = f"tau{args.ecg_tau}"
             stage2Name += f"_{lam_disp}_{tau_disp}_k{args.ecg_k}"
