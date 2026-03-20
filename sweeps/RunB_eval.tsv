@@ -1,0 +1,18 @@
+#slurm_logs_dir=/ocean/projects/cis260049p/zliu49/cegs/ECG_Loss/slurm_logs
+#runs_dir=/ocean/projects/cis260049p/zliu49/cegs_runs
+#data_dir=/ocean/projects/cis260049p/zliu49/cegs
+dataset	source_job	source_task	attacks	adv_eps	adv_steps	c_corruptions	c_severity	imbalance	wandb_project	wandb_group	wandb_name	env_IMAGENET_ORIGINAL	env_IMAGENET_RES	env_IMAGENET_DS_ROOT	env_DL_WORKERS
+binaryCifar10	37988109	0	fgsm,pgd_linf,pgd_linf_rs	8	20			none	ecg_binary_pmax	LT_Eval	eval_binaryCifar10_CE_LT_from37988109_0				
+binaryCifar10	38017823	1	fgsm,pgd_linf,pgd_linf_rs	8	20			none	ecg_binary_pmax	LT_Eval	eval_binaryCifar10_best_LT_from38017823_1				
+cifar10	37990933	0	fgsm,pgd_linf,pgd_linf_rs	8	20	gaussian_noise,brightness	5	exp	ecg-cifar10	LT_Eval	eval_cifar10_CE_LT_from37990933_0				
+cifar10	38012986	6	fgsm,pgd_linf,pgd_linf_rs	8	20	gaussian_noise,brightness	5	exp	ecg-cifar10	LT_Eval	eval_cifar10_best_LT_from38012986_6				
+cifar100	38017077	0	fgsm,pgd_linf,pgd_linf_rs	8	20	gaussian_noise,brightness	5	exp	ecg-cifar100-pmax1	LT_Eval	eval_cifar100_lr001_CE_LT_from38017077_0				
+cifar100	38019954	3	fgsm,pgd_linf,pgd_linf_rs	8	20	gaussian_noise,brightness	5	exp	ecg-cifar100-pmax1	LT_Eval	eval_cifar100_lr001_best_LT_from38019954_3				
+cifar100	37991463	0	fgsm,pgd_linf,pgd_linf_rs	8	20	gaussian_noise,brightness	5	exp	ecg-cifar100-pmax	LT_Eval	eval_cifar100_lr01_CE_LT_from37991463_0				
+cifar100	38007062	1	fgsm,pgd_linf,pgd_linf_rs	8	20	gaussian_noise,brightness	5	exp	ecg-cifar100-pmax	LT_Eval	eval_cifar100_lr01_best_LT_from38007062_1				
+svhn	37991813	0	fgsm,pgd_linf,pgd_linf_rs	8	20			exp	ecg-svhn-pmax	LT_Eval	eval_svhn_CE_LT_from37991813_0				
+svhn	38017315	0	fgsm,pgd_linf,pgd_linf_rs	8	20			exp	ecg-svhn-pmax	LT_Eval	eval_svhn_best_LT_from38017315_0				
+imageNet	37974226	0	fgsm,pgd_linf,pgd_linf_rs	8	20			none	cegs-imageNet32-pmax	LT_Eval	eval_imnet32_CE_LT_from37974226_0	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	0
+imageNet	38020038	0	fgsm,pgd_linf,pgd_linf_rs	8	20			none	cegs-imageNet32-pmax	LT_Eval	eval_imnet32_best_q38_LT_from38020038_0	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	0
+imageNet	38037317	0	fgsm,pgd_linf,pgd_linf_rs	8	20			none	cegs-imageNet32-pmax	LT_Eval	eval_imnet32_best_q38-70_LT_from38037317_0	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	0
+imageNet	38037317	2	fgsm,pgd_linf,pgd_linf_rs	8	20			none	cegs-imageNet32-pmax	LT_Eval	eval_imnet32_best_q38-80_LT_from38037317_2	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	0
