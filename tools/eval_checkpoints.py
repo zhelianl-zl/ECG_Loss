@@ -216,7 +216,18 @@ def build_test_loader(dataset_name: str, batch_size: int = 64):
     elif dataset_name == "imageNet":
         imagenet_orig = os.environ.get("IMAGENET_ORIGINAL", "0").lower() in ("1", "true")
         if not imagenet_orig:
-            root_dir = os.environ.get("IMAGENET_DS_ROOT", os.path.join(data_root, "smallimagenet_32"))
+            root_dir = os.environ.get("IMAGENET_DS_ROOT", "")
+            if not root_dir:
+                for candidate in ("SmallImageNet_32x32", "smallimagenet_32",
+                                  "smallImageNet_32x32", "imageNet"):
+                    p = os.path.join(data_root, candidate)
+                    if os.path.isdir(p):
+                        root_dir = p
+                        break
+            if not root_dir:
+                raise FileNotFoundError(
+                    "IMAGENET_DS_ROOT not set and no known SmallImageNet directory found "
+                    f"under {data_root}. Set env_IMAGENET_DS_ROOT in your eval TSV.")
             res = int(os.environ.get("IMAGENET_RES", "32"))
             n_cls = int(os.environ.get("IMAGENET_CLASSES", "1000"))
             ds = SmallImagenet(root=root_dir, size=res, train=False, transform=tf, classes=range(n_cls))
@@ -708,6 +719,7 @@ def args_from_tsv(conf_path, idx):
         adv_restarts=int(_g(hp, "adv_restarts", "1")),
         autoattack=_g(hp, "autoattack", ""),
         autoattack_norm=_g(hp, "autoattack_norm", "Linf"),
+        autoattack_eps_l2=float(_g(hp, "autoattack_eps_l2", "0")) or None,
         c_corruptions=_g(hp, "c_corruptions"),
         c_severity=int(_g(hp, "c_severity", "5")),
         imbalance=_g(hp, "imbalance", "none"),
@@ -816,8 +828,15 @@ def run_eval(args):
                 norms.append("Linf")
             if aa_flag in ("l2", "both"):
                 norms.append("L2")
+            aa_eps_l2 = getattr(args, "autoattack_eps_l2", None)
             for aa_norm in norms:
-                aa_eps = eps_01 if aa_norm == "Linf" else eps_01 * 4
+                if aa_norm == "L2":
+                    if aa_eps_l2 is None or aa_eps_l2 <= 0:
+                        print(f"  [SKIP] AA-L2: set autoattack_eps_l2 (no default)")
+                        continue
+                    aa_eps = aa_eps_l2
+                else:
+                    aa_eps = eps_01
                 t0 = time.time()
                 aa_res = eval_autoattack(norm_model, test_loader, device, aa_eps, norm=aa_norm)
                 dt = time.time() - t0
@@ -914,6 +933,7 @@ def main():
     p.add_argument("--adv_restarts", type=int, default=1)
     p.add_argument("--autoattack", type=str, default="", help="Linf|L2|both|True to run AutoAttack")
     p.add_argument("--autoattack_norm", type=str, default="Linf")
+    p.add_argument("--autoattack_eps_l2", type=float, default=0, help="L2 eps for AutoAttack (required if L2)")
     p.add_argument("--c_corruptions", type=str, default="")
     p.add_argument("--c_severity", type=int, default=5)
     p.add_argument("--imbalance", type=str, default="none")
@@ -937,6 +957,7 @@ def main():
         args.adv_alpha_01 = (args.adv_alpha / 255.0) if args.adv_alpha > 0 else (2.5 * eps_01 / max(args.adv_steps, 1))
         args.eval_calibration = args.eval_calibration.lower() in ("1", "true", "yes")
         args.eval_ecgs_diag = args.eval_ecgs_diag.lower() in ("1", "true", "yes")
+        args.autoattack_eps_l2 = args.autoattack_eps_l2 if args.autoattack_eps_l2 > 0 else None
 
     if not any([getattr(args, "job", None), getattr(args, "ckpt", None),
                 getattr(args, "ckpt_dir", None)]):
