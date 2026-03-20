@@ -13,7 +13,7 @@ cifar100	38007062	1	fgsm,pgd_linf,pgd_linf_rs	8	20	gaussian_noise,brightness	5	n
 svhn	37991813	0	fgsm,pgd_linf,pgd_linf_rs	8	20			none	ecg-svhn-pmax	Balanced_Eval	eval_svhn_CE_from37991813_0				
 svhn	38017315	0	fgsm,pgd_linf,pgd_linf_rs	8	20			none	ecg-svhn-pmax	Balanced_Eval	eval_svhn_best_from38017315_0				
 svhn	38084356	1	fgsm,pgd_linf,pgd_linf_rs	8	20			none	ecg-svhn-pmax	Balanced_Eval	eval_svhn_best_50ep_from38084356_1				
-svhn	38084356	1	fgsm,pgd_linf,pgd_linf_rs	8	20			none	ecg-svhn-pmax	Balanced_Eval	eval_svhn_best_50ep_from38084356_1				
+svhn	38064246	6	fgsm,pgd_linf,pgd_linf_rs	8	20			none	ecg-svhn-pmax	Balanced_Eval	eval_svhn_best_55ep_q80-85_from38064246_6				
 imageNet	37974226	0	fgsm,pgd_linf,pgd_linf_rs	8	20			none	cegs-imageNet32-pmax	Balanced_Eval	eval_imnet32_CE_from37974226_0	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	0
 imageNet	38020038	0	fgsm,pgd_linf,pgd_linf_rs	8	20			none	cegs-imageNet32-pmax	Balanced_Eval	eval_imnet32_best_q38_from38020038_0	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	0
 imageNet	38037317	0	fgsm,pgd_linf,pgd_linf_rs	8	20			none	cegs-imageNet32-pmax	Balanced_Eval	eval_imnet32_best_q38-70_from38037317_0	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	0
