@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 """
-Offline checkpoint evaluator: ADV / C-suite / LT metrics.
+Offline checkpoint evaluator v2 — ADV / C-suite / calibration / LT / ECGS diagnostics.
 
-Loads saved .pt checkpoints and runs evaluations without retraining.
+All adversarial attacks run in **pixel space [0,1]** with correct clamping.
+A NormalizeModel wrapper applies per-channel normalization before the real
+forward pass, so eps/alpha have their literal pixel-scale meaning.
 
 Usage:
 
-  # TSV-driven batch mode (for RunA/RunB eval sweeps via SLURM)
+  # TSV batch mode (SLURM array)
   python tools/eval_checkpoints.py --conf sweeps/RunA_eval.tsv --idx 0
 
-  # Evaluate by SLURM array-job/task ID (resolves real dir via slurm logs)
+  # Single SLURM job
   python tools/eval_checkpoints.py --job 37988109 --task 0 --dataset binaryCifar10 \
-      --slurm_logs_dir slurm_logs --attacks fgsm,pgd_linf,pgd_linf_rs \
-      --wandb_project ecg_binary_pmax
+      --slurm_logs_dir slurm_logs --wandb_project ecg_binary_pmax
 
-  # Evaluate all checkpoints in a directory
-  python tools/eval_checkpoints.py --ckpt_dir /path/to/models/ \
-      --dataset cifar10 --attacks fgsm,pgd_linf,pgd_linf_rs
+  # Directory of checkpoints
+  python tools/eval_checkpoints.py --ckpt_dir /path/to/models/ --dataset cifar10
 
   # Single checkpoint
   python tools/eval_checkpoints.py --ckpt /path/to/model_epoch60.pt --dataset cifar10
@@ -25,9 +25,12 @@ Usage:
 import os
 import sys
 import glob
+import pickle
+import random
 import argparse
 import time
 import re
+import math
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -35,7 +38,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(SCRIPT_DIR)
@@ -46,51 +49,119 @@ from models import ResNet, BasicBlock, Bottleneck, Wide_ResNet
 import torchvision.models as tv_models
 from torchvision import datasets, transforms
 from torchvision.datasets.vision import VisionDataset
+from PIL import Image
+
+try:
+    from autoattack import AutoAttack
+    HAS_AUTOATTACK = True
+except ImportError:
+    HAS_AUTOATTACK = False
 
 DEFAULT_RUNS_DIR = "/ocean/projects/cis260049p/zliu49/cegs_runs"
 
-# ---------------------------------------------------------------------------
-#  Dataset helpers (mirrors train.py logic, test-only)
-# ---------------------------------------------------------------------------
+DATASET_STATS: Dict[str, dict] = {
+    "cifar10":       {"mean": (0.4914, 0.4822, 0.4465), "std": (0.2471, 0.2435, 0.2616), "C": 10},
+    "binaryCifar10": {"mean": (0.4914, 0.4822, 0.4465), "std": (0.2471, 0.2435, 0.2616), "C": 2},
+    "cifar100":      {"mean": (0.5071, 0.4867, 0.4408), "std": (0.2675, 0.2565, 0.2761), "C": 100},
+    "svhn":          {"mean": (0.0, 0.0, 0.0),          "std": (1.0, 1.0, 1.0),          "C": 10},
+    "imageNet":      {"mean": (0.4810, 0.4574, 0.4078), "std": (0.2146, 0.2104, 0.2138), "C": 1000},
+    "imageNet224":   {"mean": (0.485, 0.456, 0.406),    "std": (0.229, 0.224, 0.225),    "C": 1000},
+}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  NormalizeModel — wraps a raw model so attacks can operate in [0,1]
+# ═══════════════════════════════════════════════════════════════════════════
+
+class NormalizeModel(nn.Module):
+    """Prepend per-channel normalization so inputs stay in pixel space [0,1]."""
+
+    def __init__(self, model: nn.Module, mean: Tuple[float, ...], std: Tuple[float, ...]):
+        super().__init__()
+        self.model = model
+        self.register_buffer("_mean", torch.tensor(mean, dtype=torch.float32).view(1, -1, 1, 1))
+        self.register_buffer("_std",  torch.tensor(std,  dtype=torch.float32).view(1, -1, 1, 1))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.model((x - self._mean) / self._std)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Dataset helpers (test-only, mirrors train.py)
+# ═══════════════════════════════════════════════════════════════════════════
+
+class SmallImagenet(VisionDataset):
+    """ImageNet-Downsampled (32×32 / 64×64) pickle loader — copied from train.py."""
+    train_list = [f"train_data_batch_{i+1}" for i in range(10)]
+    val_list = ["val_data"]
+
+    def __init__(self, root="data", size=32, train=True, transform=None, classes=None, shuffle=False):
+        super().__init__(root, transform=transform)
+        file_list = self.train_list if train else self.val_list
+        self.data, self.targets = [], []
+        for fn in file_list:
+            with open(os.path.join(self.root, fn), "rb") as f:
+                entry = pickle.load(f)
+            self.data.append(entry["data"].reshape(-1, 3, size, size))
+            self.targets.append(entry["labels"])
+        self.data = np.vstack(self.data).transpose((0, 2, 3, 1))
+        self.targets = np.concatenate(self.targets).astype(int) - 1
+        if classes is not None:
+            classes = np.array(classes)
+            fd, ft = [], []
+            for c in classes:
+                m = self.targets == c
+                fd.append(self.data[m])
+                ft.append(self.targets[m])
+            self.data = np.vstack(fd)
+            self.targets = np.concatenate(ft)
+        if shuffle:
+            perm = np.arange(len(self.data))
+            random.shuffle(perm)
+            self.data = self.data[perm]
+            self.targets = self.targets[perm]
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        img = Image.fromarray(self.data[idx])
+        if self.transform:
+            img = self.transform(img)
+        return img, int(self.targets[idx])
+
 
 class BinaryCIFAR10(torch.utils.data.Dataset):
     def __init__(self, root, train=True, transform=None, positive_class="cat", negative_class="dog"):
         cifar = datasets.CIFAR10(root, train=train, download=True, transform=transform)
-        class_names = cifar.classes
-        pos_idx = class_names.index(positive_class)
-        neg_idx = class_names.index(negative_class)
-        mask = [(t == pos_idx or t == neg_idx) for t in cifar.targets]
-        indices = [i for i, m in enumerate(mask) if m]
-        self.data = torch.utils.data.Subset(cifar, indices)
-        self._label_map = {pos_idx: 1, neg_idx: 0}
+        pos_idx = cifar.classes.index(positive_class)
+        neg_idx = cifar.classes.index(negative_class)
+        indices = [i for i, t in enumerate(cifar.targets) if t in (pos_idx, neg_idx)]
+        self.data = Subset(cifar, indices)
+        self._map = {pos_idx: 1, neg_idx: 0}
+        self.targets = [self._map[cifar.targets[i]] for i in indices]
 
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, idx):
         img, label = self.data[idx]
-        return img, self._label_map[label]
+        return img, self._map.get(label, label)
 
 
 class CIFAR10C(VisionDataset):
     def __init__(self, root, name="gaussian_noise", severity=5, transform=None):
         super().__init__(root, transform=transform)
-        data_path = os.path.join(root, "CIFAR-10-C", f"{name}.npy")
-        labels_path = os.path.join(root, "CIFAR-10-C", "labels.npy")
-        self.data = np.load(data_path)
-        self.targets = np.load(labels_path).astype(np.int64)
-        n_per_sev = 10000
-        start = (severity - 1) * n_per_sev
-        end = severity * n_per_sev
-        if len(self.data) >= end:
-            self.data = self.data[start:end]
-            self.targets = self.targets[start:end]
+        self.data = np.load(os.path.join(root, "CIFAR-10-C", f"{name}.npy"))
+        self.targets = np.load(os.path.join(root, "CIFAR-10-C", "labels.npy")).astype(np.int64)
+        s, e = (severity - 1) * 10000, severity * 10000
+        if len(self.data) >= e:
+            self.data, self.targets = self.data[s:e], self.targets[s:e]
 
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, idx):
-        from PIL import Image
         img = Image.fromarray(self.data[idx])
         if self.transform:
             img = self.transform(img)
@@ -100,91 +171,83 @@ class CIFAR10C(VisionDataset):
 class CIFAR100C(VisionDataset):
     def __init__(self, root, name="gaussian_noise", severity=5, transform=None):
         super().__init__(root, transform=transform)
-        data_path = os.path.join(root, "CIFAR-100-C", f"{name}.npy")
-        labels_path = os.path.join(root, "CIFAR-100-C", "labels.npy")
-        self.data = np.load(data_path)
-        self.targets = np.load(labels_path).astype(np.int64)
-        n_per_sev = 10000
-        start = (severity - 1) * n_per_sev
-        end = severity * n_per_sev
-        if len(self.data) >= end:
-            self.data = self.data[start:end]
-            self.targets = self.targets[start:end]
+        self.data = np.load(os.path.join(root, "CIFAR-100-C", f"{name}.npy"))
+        self.targets = np.load(os.path.join(root, "CIFAR-100-C", "labels.npy")).astype(np.int64)
+        s, e = (severity - 1) * 10000, severity * 10000
+        if len(self.data) >= e:
+            self.data, self.targets = self.data[s:e], self.targets[s:e]
 
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, idx):
-        from PIL import Image
         img = Image.fromarray(self.data[idx])
         if self.transform:
             img = self.transform(img)
         return img, int(self.targets[idx])
 
 
-def _get_small_imagenet_class():
-    from train import SmallImagenet
-    return SmallImagenet
+# ═══════════════════════════════════════════════════════════════════════════
+#  Data loading — returns UNNORMALIZED [0,1] tensors
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _resolve_data_root() -> str:
+    for var in ("CEGS_DATA_DIR", "DATA_DIR"):
+        v = os.environ.get(var, "").strip()
+        if v and os.path.isdir(v):
+            return v
+    fallback = os.path.join(ROOT_DIR, "..", "data")
+    return fallback if os.path.isdir(fallback) else "../data"
 
 
-def build_test_loader(dataset_name, batch_size=64, data_root=None):
-    """Build test DataLoader. Returns (test_loader, num_classes, test_transform)."""
-    if data_root is None:
-        data_root = os.environ.get("CEGS_DATA_DIR", os.path.join(ROOT_DIR, "..", "data"))
-    if not os.path.isdir(data_root):
-        data_root = "../data"
+def build_test_loader(dataset_name: str, batch_size: int = 64):
+    """Return (test_loader, num_classes). Images are in [0,1] — no normalization."""
+    tf = transforms.ToTensor()
+    data_root = _resolve_data_root()
 
     if dataset_name == "cifar10":
-        mean, std = (0.4914, 0.4822, 0.4465), (0.2471, 0.2435, 0.2616)
-        test_tf = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean, std)])
-        data_test = datasets.CIFAR10(data_root, train=False, download=True, transform=test_tf)
-        num_classes = 10
+        ds = datasets.CIFAR10(data_root, train=False, download=True, transform=tf)
     elif dataset_name == "binaryCifar10":
-        mean, std = (0.4914, 0.4822, 0.4465), (0.2471, 0.2435, 0.2616)
-        test_tf = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean, std)])
-        data_test = BinaryCIFAR10(data_root, train=False, transform=test_tf)
-        num_classes = 2
+        ds = BinaryCIFAR10(data_root, train=False, transform=tf)
     elif dataset_name == "cifar100":
-        mean, std = (0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761)
-        test_tf = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean, std)])
-        data_test = datasets.CIFAR100(data_root, train=False, download=True, transform=test_tf)
-        num_classes = 100
+        ds = datasets.CIFAR100(data_root, train=False, download=True, transform=tf)
     elif dataset_name == "svhn":
-        test_tf = transforms.Compose([transforms.ToTensor()])
-        data_test = datasets.SVHN(data_root, split="test", download=True, transform=test_tf)
-        num_classes = 10
+        ds = datasets.SVHN(data_root, split="test", download=True, transform=tf)
     elif dataset_name == "imageNet":
-        imagenet_original = os.environ.get("IMAGENET_ORIGINAL", "0").lower() in ("1", "true")
-        if not imagenet_original:
+        imagenet_orig = os.environ.get("IMAGENET_ORIGINAL", "0").lower() in ("1", "true")
+        if not imagenet_orig:
             root_dir = os.environ.get("IMAGENET_DS_ROOT", os.path.join(data_root, "smallimagenet_32"))
-            resolution = int(os.environ.get("IMAGENET_RES", "32"))
-            classes = int(os.environ.get("IMAGENET_CLASSES", "1000"))
-            normalize = transforms.Normalize(mean=[0.4810, 0.4574, 0.4078], std=[0.2146, 0.2104, 0.2138])
-            test_tf = transforms.Compose([transforms.ToTensor(), normalize])
-            SmallImagenet = _get_small_imagenet_class()
-            data_test = SmallImagenet(root=root_dir, size=resolution, train=False, transform=test_tf, classes=range(classes))
+            res = int(os.environ.get("IMAGENET_RES", "32"))
+            n_cls = int(os.environ.get("IMAGENET_CLASSES", "1000"))
+            ds = SmallImagenet(root=root_dir, size=res, train=False, transform=tf, classes=range(n_cls))
         else:
-            imagenet_root = os.environ.get("IMAGENET_ROOT", os.path.join(data_root, "imageNet"))
-            valdir = os.path.join(imagenet_root, "val")
-            normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-            test_tf = transforms.Compose([transforms.Resize(256), transforms.CenterCrop(224), transforms.ToTensor(), normalize])
-            data_test = datasets.ImageFolder(valdir, test_tf)
-        num_classes = 1000
+            valdir = os.path.join(os.environ.get("IMAGENET_ROOT", os.path.join(data_root, "imageNet")), "val")
+            ds = datasets.ImageFolder(valdir, transforms.Compose([
+                transforms.Resize(256), transforms.CenterCrop(224), tf]))
     else:
         raise ValueError(f"Unknown dataset: {dataset_name}")
 
-    test_loader = DataLoader(data_test, batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=True)
-    return test_loader, num_classes, test_tf
+    num_classes = DATASET_STATS.get(dataset_name, {}).get("C", 10)
+    loader = DataLoader(ds, batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=True)
+    return loader, num_classes
 
 
-def build_model(dataset_name, device="cuda"):
-    """Build model architecture (same as train.py resetModel)."""
+def _get_norm_params(dataset_name: str) -> Tuple[Tuple, Tuple]:
+    imagenet_orig = os.environ.get("IMAGENET_ORIGINAL", "0").lower() in ("1", "true")
+    key = "imageNet224" if (dataset_name == "imageNet" and imagenet_orig) else dataset_name
+    s = DATASET_STATS.get(key, DATASET_STATS.get(dataset_name, {"mean": (0,0,0), "std": (1,1,1)}))
+    return s["mean"], s["std"]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Model building — matches train.py resetModel exactly
+# ═══════════════════════════════════════════════════════════════════════════
+
+def build_model(dataset_name: str, device: str = "cuda") -> Tuple[nn.Module, int]:
     dropout_rate = 0.5
     if dataset_name == "imageNet":
-        num_classes = 1000
-        depth = 50
-        dropout_rate = 0.3
-        use_tv = os.environ.get("IMAGENET_TORCHVISION", "1").lower() in ("1", "true", "yes")
+        num_classes, depth, dropout_rate = 1000, 50, 0.3
+        use_tv = os.environ.get("IMAGENET_TORCHVISION", "1").lower() in ("1", "true", "yes", "y")
         if use_tv:
             ctor = {18: tv_models.resnet18, 34: tv_models.resnet34,
                     50: tv_models.resnet50, 101: tv_models.resnet101}.get(depth, tv_models.resnet50)
@@ -210,128 +273,299 @@ def build_model(dataset_name, device="cuda"):
     return m.to(device), num_classes
 
 
-# ---------------------------------------------------------------------------
-#  Attack implementations
-# ---------------------------------------------------------------------------
+# ═══════════════════════════════════════════════════════════════════════════
+#  Attacks — pixel space [0,1], autograd.grad, proper clamping
+# ═══════════════════════════════════════════════════════════════════════════
 
-def fgsm_attack(model, X, y, epsilon):
+def _fgsm(norm_model: nn.Module, X: torch.Tensor, y: torch.Tensor, eps: float) -> torch.Tensor:
     delta = torch.zeros_like(X, requires_grad=True)
-    loss = F.cross_entropy(model(X + delta), y)
-    loss.backward()
-    return (epsilon * delta.grad.detach().sign()).clamp(-epsilon, epsilon)
-
-
-def pgd_linf_attack(model, X, y, epsilon, alpha, num_iter, random_start=False):
-    delta = torch.zeros_like(X).uniform_(-epsilon, epsilon) if random_start else torch.zeros_like(X)
-    for _ in range(num_iter):
-        delta.requires_grad = True
-        loss = F.cross_entropy(model(X + delta), y)
-        loss.backward()
-        delta = (delta.detach() + alpha * delta.grad.detach().sign()).clamp(-epsilon, epsilon)
-        delta.grad = None
+    loss = F.cross_entropy(norm_model(X + delta), y)
+    grad = torch.autograd.grad(loss, delta)[0]
+    delta = (eps * grad.sign())
+    delta = (X + delta).clamp(0.0, 1.0) - X
     return delta.detach()
 
 
-# ---------------------------------------------------------------------------
-#  Evaluation functions
-# ---------------------------------------------------------------------------
+def _pgd_linf(norm_model: nn.Module, X: torch.Tensor, y: torch.Tensor,
+              eps: float, alpha: float, num_iter: int, random_start: bool = True) -> torch.Tensor:
+    delta = torch.zeros_like(X)
+    if random_start:
+        delta.uniform_(-eps, eps)
+        delta = (X + delta).clamp(0.0, 1.0) - X
 
-def eval_standard(model, loader, device):
-    model.eval()
+    for _ in range(num_iter):
+        delta.requires_grad_(True)
+        loss = F.cross_entropy(norm_model(X + delta), y)
+        grad = torch.autograd.grad(loss, delta)[0]
+        delta = (delta.detach() + alpha * grad.sign()).clamp(-eps, eps)
+        delta = (X + delta).clamp(0.0, 1.0) - X
+
+    return delta.detach()
+
+
+def _pgd_with_restarts(norm_model, X, y, eps, alpha, num_iter, restarts):
+    best_delta = torch.zeros_like(X)
+    best_loss = torch.full((X.shape[0],), -float("inf"), device=X.device)
+
+    for r in range(restarts):
+        delta = _pgd_linf(norm_model, X, y, eps, alpha, num_iter, random_start=(restarts > 1 or r > 0))
+        with torch.no_grad():
+            loss_i = F.cross_entropy(norm_model(X + delta), y, reduction="none")
+        improved = loss_i > best_loss
+        best_loss[improved] = loss_i[improved]
+        best_delta[improved] = delta[improved]
+
+    return best_delta
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Evaluation functions
+# ═══════════════════════════════════════════════════════════════════════════
+
+def eval_standard(norm_model, loader, device):
+    norm_model.eval()
     total_err, total_loss, n = 0.0, 0.0, 0
     with torch.no_grad():
         for X, y in loader:
             X, y = X.to(device), y.to(device)
-            out = model(X)
+            out = norm_model(X)
             total_err += (out.argmax(1) != y).sum().item()
             total_loss += F.cross_entropy(out, y, reduction="sum").item()
             n += len(y)
-    return total_err / n, total_loss / n
+    return {"STD/Error": total_err / n, "STD/Acc": 1.0 - total_err / n, "STD/Loss": total_loss / n}
 
 
-def eval_adversarial(model, loader, device, epsilon, alpha, num_iter, attack_type="pgd_linf"):
-    model.eval()
+def eval_adversarial(norm_model, loader, device, eps_01, alpha_01, num_iter,
+                     attack_type="pgd_linf", restarts=1):
+    """Run adversarial attack in pixel space. eps_01/alpha_01 are in [0,1] scale."""
+    norm_model.eval()
     total_err, total_loss, n = 0.0, 0.0, 0
     for X, y in loader:
         X, y = X.to(device), y.to(device)
         if attack_type == "fgsm":
-            delta = fgsm_attack(model, X, y, epsilon)
+            delta = _fgsm(norm_model, X, y, eps_01)
         elif attack_type == "pgd_linf_rs":
-            delta = pgd_linf_attack(model, X, y, epsilon, alpha, num_iter, random_start=True)
+            delta = _pgd_with_restarts(norm_model, X, y, eps_01, alpha_01, num_iter, max(restarts, 1))
         else:
-            delta = pgd_linf_attack(model, X, y, epsilon, alpha, num_iter, random_start=False)
+            delta = _pgd_with_restarts(norm_model, X, y, eps_01, alpha_01, num_iter, restarts)
         with torch.no_grad():
-            out = model(X + delta)
+            out = norm_model((X + delta).clamp(0.0, 1.0))
             total_err += (out.argmax(1) != y).sum().item()
             total_loss += F.cross_entropy(out, y, reduction="sum").item()
         n += len(y)
-    return total_err / n, total_loss / n
+    err = total_err / n
+    return {"Error": err, "Acc": 1.0 - err, "Loss": total_loss / n}
 
 
-def eval_corruption(model, device, dataset_name, corruption, severity, batch_size=64):
-    """Evaluate on CIFAR-10-C or CIFAR-100-C. Returns (err, loss) or None."""
-    data_root = os.environ.get("CEGS_DATA_DIR",
-                               os.environ.get("DATA_DIR", os.path.join(ROOT_DIR, "..", "data")))
-    if not os.path.isdir(data_root):
-        data_root = "../data"
-    if dataset_name == "cifar10":
-        mean, std = (0.4914, 0.4822, 0.4465), (0.2471, 0.2435, 0.2616)
-    elif dataset_name == "cifar100":
-        mean, std = (0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761)
-    else:
+def eval_autoattack(norm_model, loader, device, eps_01, norm="Linf", version="standard", batch_size=256):
+    if not HAS_AUTOATTACK:
+        print("  [SKIP] autoattack not installed (pip install autoattack)")
         return None
-    tf = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean, std)])
+    norm_model.eval()
+    all_x, all_y = [], []
+    for x, y in loader:
+        all_x.append(x)
+        all_y.append(y)
+    all_x = torch.cat(all_x).to(device)
+    all_y = torch.cat(all_y).to(device)
+
+    adversary = AutoAttack(norm_model, norm=norm, eps=eps_01, version=version, verbose=True)
+    x_adv = adversary.run_standard_evaluation(all_x, all_y, bs=batch_size)
+
+    with torch.no_grad():
+        total_err, n = 0, 0
+        for i in range(0, len(x_adv), batch_size):
+            xb, yb = x_adv[i:i + batch_size], all_y[i:i + batch_size]
+            total_err += (norm_model(xb).argmax(1) != yb).sum().item()
+            n += len(yb)
+    err = total_err / n
+    return {"Error": err, "Acc": 1.0 - err}
+
+
+def eval_corruption(norm_model, device, dataset_name, corruption, severity, batch_size=64):
+    """Evaluate on CIFAR-10-C / CIFAR-100-C (unnormalized loader, NormalizeModel handles norm)."""
+    data_root = _resolve_data_root()
+    tf = transforms.ToTensor()
     try:
-        CClass = CIFAR10C if dataset_name == "cifar10" else CIFAR100C
-        c_data = CClass(data_root, name=corruption, severity=severity, transform=tf)
+        if dataset_name == "cifar10":
+            ds = CIFAR10C(data_root, name=corruption, severity=severity, transform=tf)
+        elif dataset_name == "cifar100":
+            ds = CIFAR100C(data_root, name=corruption, severity=severity, transform=tf)
+        else:
+            return None
     except Exception as e:
         print(f"  [C] Could not load {corruption} s{severity}: {e}")
         return None
-    c_loader = DataLoader(c_data, batch_size=batch_size, shuffle=False, num_workers=0)
-    model.eval()
+
+    loader = DataLoader(ds, batch_size=batch_size, shuffle=False, num_workers=0)
+    norm_model.eval()
     total_err, total_loss, n = 0.0, 0.0, 0
     with torch.no_grad():
-        for X, y in c_loader:
+        for X, y in loader:
             X, y = X.to(device), y.to(device)
-            out = model(X)
+            out = norm_model(X)
             total_err += (out.argmax(1) != y).sum().item()
             total_loss += F.cross_entropy(out, y, reduction="sum").item()
             n += len(y)
     if n == 0:
         return None
-    return total_err / n, total_loss / n
+    err = total_err / n
+    return {"Error": err, "Acc": 1.0 - err, "Loss": total_loss / n}
 
 
-def eval_longtail(model, loader, device, num_classes):
-    """Per-class accuracy -> balanced acc, many/medium/few splits."""
-    model.eval()
+# ── Calibration ──────────────────────────────────────────────────────────
+
+def eval_calibration(norm_model, loader, device, n_bins=15):
+    """ECE, NLL (= cross-entropy), Brier score on clean test data."""
+    norm_model.eval()
+    all_logits, all_labels = [], []
+    with torch.no_grad():
+        for X, y in loader:
+            X, y = X.to(device), y.to(device)
+            all_logits.append(norm_model(X).cpu())
+            all_labels.append(y.cpu())
+    logits = torch.cat(all_logits)
+    labels = torch.cat(all_labels)
+    probs = F.softmax(logits, dim=1)
+    confidences, predictions = probs.max(dim=1)
+    accuracies = predictions.eq(labels).float()
+
+    nll = F.cross_entropy(logits, labels).item()
+
+    one_hot = F.one_hot(labels, probs.shape[1]).float()
+    brier = ((probs - one_hot) ** 2).sum(dim=1).mean().item()
+
+    ece = 0.0
+    for i in range(n_bins):
+        lo, hi = i / n_bins, (i + 1) / n_bins
+        mask = (confidences > lo) & (confidences <= hi)
+        if mask.any():
+            ece += mask.sum().item() * abs(accuracies[mask].mean().item() - confidences[mask].mean().item())
+    ece /= len(labels)
+
+    return {"CAL/ECE": ece, "CAL/NLL": nll, "CAL/Brier": brier}
+
+
+# ── Long-tail per-class analysis ─────────────────────────────────────────
+
+def _expected_class_counts(num_classes, imb_factor=100, imb_seed=0,
+                           max_per_class=5000):
+    """Replicate train.py _longtail_train_indices counts without loading data."""
+    counts = np.array([
+        max(1, int(max_per_class * (imb_factor ** (-k / max(1, num_classes - 1)))))
+        for k in range(num_classes)
+    ])
+    if imb_seed and imb_seed != 0:
+        rng = np.random.default_rng(imb_seed)
+        perm = rng.permutation(num_classes)
+        counts = counts[perm]
+    return counts
+
+
+def eval_longtail(norm_model, loader, device, num_classes,
+                  imbalance="none", imb_factor=100, imb_seed=0):
+    """Per-class accuracy with training-frequency-based grouping."""
+    norm_model.eval()
     all_preds, all_labels = [], []
     with torch.no_grad():
         for X, y in loader:
             X, y = X.to(device), y.to(device)
-            all_preds.append(model(X).argmax(1).cpu().numpy())
+            all_preds.append(norm_model(X).argmax(1).cpu().numpy())
             all_labels.append(y.cpu().numpy())
     preds = np.concatenate(all_preds)
     labels = np.concatenate(all_labels)
-    per_class_acc = np.zeros(num_classes)
-    per_class_n = np.zeros(num_classes)
+
+    per_class_correct = np.zeros(num_classes)
+    per_class_total = np.zeros(num_classes)
     for c in range(num_classes):
         mask = labels == c
-        per_class_n[c] = mask.sum()
-        if per_class_n[c] > 0:
-            per_class_acc[c] = (preds[mask] == labels[mask]).sum() / per_class_n[c]
-    valid = per_class_n > 0
-    balanced = float(np.mean(per_class_acc[valid])) if valid.any() else 0.0
-    third = max(1, num_classes // 3)
-    many = float(np.mean(per_class_acc[:third])) if third else 0.0
-    medium = float(np.mean(per_class_acc[third:2 * third])) if 2 * third > third else 0.0
-    few = float(np.mean(per_class_acc[2 * third:])) if num_classes > 2 * third else 0.0
-    return {"BalancedAcc": balanced, "ManyAcc": many, "MediumAcc": medium, "FewAcc": few}
+        per_class_total[c] = mask.sum()
+        if per_class_total[c] > 0:
+            per_class_correct[c] = (preds[mask] == c).sum()
+    per_class_acc = np.where(per_class_total > 0, per_class_correct / per_class_total, 0.0)
+    valid = per_class_total > 0
+
+    result = {
+        "LT/BalancedAcc": float(np.mean(per_class_acc[valid])) if valid.any() else 0.0,
+        "LT/PerClassAcc_std": float(np.std(per_class_acc[valid])) if valid.any() else 0.0,
+        "LT/PerClassAcc_min": float(np.min(per_class_acc[valid])) if valid.any() else 0.0,
+        "LT/PerClassAcc_max": float(np.max(per_class_acc[valid])) if valid.any() else 0.0,
+    }
+
+    if imbalance.strip().lower() in ("exp", "longtail") and num_classes >= 3:
+        base = {"cifar10": 5000, "binaryCifar10": 5000, "cifar100": 500,
+                "svhn": 7325, "imageNet": 1300}
+        max_pc = base.get("cifar10", 5000)
+        for ds, v in base.items():
+            if ds in str(loader.dataset.__class__):
+                max_pc = v
+                break
+        counts = _expected_class_counts(num_classes, float(imb_factor), int(imb_seed), max_pc)
+        order = np.argsort(-counts)
+        sorted_acc = per_class_acc[order]
+        third = max(1, num_classes // 3)
+        result["LT/ManyAcc"] = float(np.mean(sorted_acc[:third]))
+        result["LT/MediumAcc"] = float(np.mean(sorted_acc[third:2 * third]))
+        result["LT/FewAcc"] = float(np.mean(sorted_acc[2 * third:]))
+        result["_LT_note"] = "diagnostic_only_unless_trained_on_LT"
+
+    return result
 
 
-# ---------------------------------------------------------------------------
+# ── ECGS mechanism diagnostics ───────────────────────────────────────────
+
+def eval_ecgs_diagnostics(norm_model, loader, device):
+    """Confidence-signal diagnostics from model outputs (no ECGS params needed)."""
+    norm_model.eval()
+    all_pmax, all_margin, all_lgap, all_ent, all_correct = [], [], [], [], []
+    with torch.no_grad():
+        for X, y in loader:
+            X, y = X.to(device), y.to(device)
+            logits = norm_model(X)
+            probs = F.softmax(logits, dim=1)
+
+            pmax, pred = probs.max(dim=1)
+            all_pmax.append(pmax.cpu())
+            all_correct.append((pred == y).cpu())
+
+            top2p = torch.topk(probs, min(2, probs.shape[1]), dim=1).values
+            all_margin.append((top2p[:, 0] - top2p[:, -1]).cpu())
+
+            top2l = torch.topk(logits, min(2, logits.shape[1]), dim=1).values
+            all_lgap.append((top2l[:, 0] - top2l[:, -1]).cpu())
+
+            ent = -(probs * (probs + 1e-12).log()).sum(1)
+            all_ent.append(ent.cpu())
+
+    pmax = torch.cat(all_pmax)
+    margin = torch.cat(all_margin)
+    lgap = torch.cat(all_lgap)
+    ent = torch.cat(all_ent)
+    correct = torch.cat(all_correct)
+
+    r = {
+        "DIAG/pmax_mean": pmax.mean().item(),
+        "DIAG/pmax_std": pmax.std().item(),
+        "DIAG/pmax_median": pmax.median().item(),
+        "DIAG/pmax_p90": pmax.quantile(0.9).item(),
+        "DIAG/pmax_p95": pmax.quantile(0.95).item(),
+        "DIAG/margin_mean": margin.mean().item(),
+        "DIAG/margin_std": margin.std().item(),
+        "DIAG/logit_gap_mean": lgap.mean().item(),
+        "DIAG/logit_gap_std": lgap.std().item(),
+        "DIAG/entropy_mean": ent.mean().item(),
+        "DIAG/entropy_std": ent.std().item(),
+    }
+    if correct.any():
+        r["DIAG/pmax_correct_mean"] = pmax[correct].mean().item()
+    if (~correct).any():
+        r["DIAG/pmax_wrong_mean"] = pmax[~correct].mean().item()
+    return r
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 #  Checkpoint discovery & SLURM resolution
-# ---------------------------------------------------------------------------
+# ═══════════════════════════════════════════════════════════════════════════
 
 def extract_epoch(path):
     m = re.search(r"_epoch(\d+)\.pt$", os.path.basename(path))
@@ -340,11 +574,11 @@ def extract_epoch(path):
 
 def detect_dataset(path):
     name = os.path.basename(path).lower()
-    for ds_key, ds_name in [("binarycifar10", "binaryCifar10"), ("cifar100", "cifar100"),
-                            ("cifar10", "cifar10"), ("svhn", "svhn"),
-                            ("imagenet", "imageNet"), ("imnet", "imageNet")]:
-        if ds_key in name:
-            return ds_name
+    for key, ds in [("binarycifar10", "binaryCifar10"), ("cifar100", "cifar100"),
+                    ("cifar10", "cifar10"), ("svhn", "svhn"),
+                    ("imagenet", "imageNet"), ("imnet", "imageNet")]:
+        if key in name:
+            return ds
     return None
 
 
@@ -355,12 +589,7 @@ def find_checkpoints(ckpt_dir, pattern="*_epoch*.pt"):
     return result
 
 
-def resolve_via_slurm_log(slurm_logs_dir: str, array_job: str, task: str) -> Optional[str]:
-    """Read slurm .out log to find the actual RUN= directory.
-
-    SLURM array jobs: SLURM_ARRAY_JOB_ID (in log filename) != SLURM_JOB_ID (in dir name).
-    The .out log contains RUN=/path/to/cegs_{WRAPPER_ID}_{task}.
-    """
+def resolve_via_slurm_log(slurm_logs_dir, array_job, task):
     log_path = os.path.join(slurm_logs_dir, f"slurm_cegs_{array_job}_{task}.out")
     if not os.path.isfile(log_path):
         return None
@@ -374,21 +603,13 @@ def resolve_via_slurm_log(slurm_logs_dir: str, array_job: str, task: str) -> Opt
     return None
 
 
-def resolve_job_models_dir(runs_dir: str, array_job: str, task: str,
-                           slurm_logs_dir: Optional[str] = None) -> str:
-    """Resolve checkpoint models/ directory from SLURM array-job/task IDs.
-
-    1. Parse SLURM .out log for the real RUN= path (most reliable)
-    2. Fallback: direct match cegs_{array_job}_{task}/src/models
-    3. Fallback: glob in runs_dir
-    """
+def resolve_job_models_dir(runs_dir, array_job, task, slurm_logs_dir=None):
     if slurm_logs_dir:
         run_dir = resolve_via_slurm_log(slurm_logs_dir, array_job, task)
         if run_dir:
             models_dir = os.path.join(run_dir, "src", "models")
             if os.path.isdir(models_dir):
                 return models_dir
-            print(f"  [WARN] SLURM log -> {run_dir} but src/models/ missing, trying glob")
 
     direct = os.path.join(runs_dir, f"cegs_{array_job}_{task}", "src", "models")
     if os.path.isdir(direct):
@@ -397,32 +618,20 @@ def resolve_job_models_dir(runs_dir: str, array_job: str, task: str,
     for pat in [f"*_{array_job}_{task}", f"*{array_job}*_{task}"]:
         matches = glob.glob(os.path.join(runs_dir, pat, "src", "models"))
         if matches:
-            if len(matches) > 1:
-                print(f"  [WARN] Multiple matches, using first: {matches[0]}")
             return matches[0]
 
     raise FileNotFoundError(
-        f"No run directory for job={array_job} task={task} under {runs_dir}.\n"
-        f"  slurm_logs_dir={'(not set)' if not slurm_logs_dir else slurm_logs_dir}"
-    )
+        f"No run dir for job={array_job} task={task} under {runs_dir}")
 
 
-# ---------------------------------------------------------------------------
+# ═══════════════════════════════════════════════════════════════════════════
 #  TSV batch mode
-# ---------------------------------------------------------------------------
+# ═══════════════════════════════════════════════════════════════════════════
 
-def _parse_eval_tsv(conf_path: str) -> Tuple[List[str], List[str], Dict[str, str]]:
-    """Parse eval TSV. Returns (header_fields, data_lines, meta).
-
-    Meta directives (in # comments):
-      #slurm_logs_dir=...    #runs_dir=...    #wandb_project=...    #data_dir=...
-    """
-    raw_lines = Path(conf_path).read_text(encoding="utf-8").splitlines()
-    meta: Dict[str, str] = {}
-    header_line: Optional[str] = None
-    data_lines: List[str] = []
-
-    for ln in raw_lines:
+def _parse_eval_tsv(conf_path):
+    raw = Path(conf_path).read_text(encoding="utf-8").splitlines()
+    meta, header, data = {}, None, []
+    for ln in raw:
         s = ln.rstrip()
         if not s.strip():
             continue
@@ -431,100 +640,100 @@ def _parse_eval_tsv(conf_path: str) -> Tuple[List[str], List[str], Dict[str, str
             for key in ("slurm_logs_dir", "runs_dir", "wandb_project", "data_dir"):
                 if t.lower().startswith(f"{key}="):
                     meta[key] = t.split("=", 1)[1].strip()
-            if header_line is None and t.lower().startswith("dataset\t"):
-                header_line = t
+            if header is None and t.lower().startswith("dataset\t"):
+                header = t
             continue
-        if header_line is None:
-            header_line = s
+        if header is None:
+            header = s
         else:
-            data_lines.append(s)
-    if header_line is None:
+            data.append(s)
+    if header is None:
         return [], [], meta
-    return header_line.split("\t"), data_lines, meta
+    return header.split("\t"), data, meta
 
 
-def _read_eval_row(conf_path: str, idx: int) -> Tuple[Dict[str, str], Dict[str, str]]:
-    header, data_lines, meta = _parse_eval_tsv(conf_path)
-    if idx < 0 or idx >= len(data_lines):
-        raise IndexError(f"Task index {idx} out of range (have {len(data_lines)} rows)")
-    row = data_lines[idx].split("\t")
-    if len(row) < len(header):
-        row += [""] * (len(header) - len(row))
-    elif len(row) > len(header):
-        row = row[:len(header)]
-    return dict(zip(header, row)), meta
+def _read_eval_row(conf_path, idx):
+    hdr, data, meta = _parse_eval_tsv(conf_path)
+    if idx < 0 or idx >= len(data):
+        raise IndexError(f"idx {idx} out of range ({len(data)} rows)")
+    row = data[idx].split("\t")
+    if len(row) < len(hdr):
+        row += [""] * (len(hdr) - len(row))
+    return dict(zip(hdr, row[:len(hdr)])), meta
 
 
-def args_from_tsv(conf_path: str, idx: int) -> argparse.Namespace:
-    """Build argparse.Namespace from an eval TSV row."""
+def _g(hp, key, default=""):
+    return (hp.get(key, "") or "").strip() or default
+
+
+def args_from_tsv(conf_path, idx):
     hp, meta = _read_eval_row(conf_path, idx)
-
     for k, v in hp.items():
         if k.startswith("env_") and v.strip():
             os.environ[k[4:]] = v.strip()
 
-    slurm_logs_dir = hp.get("slurm_logs_dir", "").strip() or meta.get("slurm_logs_dir", "")
-    runs_dir = hp.get("runs_dir", "").strip() or meta.get("runs_dir", "") or DEFAULT_RUNS_DIR
-    data_dir = hp.get("data_dir", "").strip() or meta.get("data_dir", "")
+    slurm_logs_dir = _g(hp, "slurm_logs_dir", meta.get("slurm_logs_dir", ""))
+    runs_dir = _g(hp, "runs_dir", meta.get("runs_dir", DEFAULT_RUNS_DIR))
+    data_dir = _g(hp, "data_dir", meta.get("data_dir", ""))
     if data_dir:
         os.environ["CEGS_DATA_DIR"] = data_dir
 
-    wandb_project = hp.get("wandb_project", "").strip() or meta.get("wandb_project", "")
-
-    array_job = os.environ.get("SLURM_ARRAY_JOB_ID", "0")
-    task_id = os.environ.get("SLURM_ARRAY_TASK_ID", str(idx))
-    job_task_suffix = f"_j{array_job}_t{task_id}"
-
-    wandb_name = hp.get("wandb_name", "").strip()
-    if wandb_name:
-        wandb_name = wandb_name[:200 - len(job_task_suffix)] + job_task_suffix
+    wandb_project = _g(hp, "wandb_project", meta.get("wandb_project", ""))
+    aj = os.environ.get("SLURM_ARRAY_JOB_ID", "0")
+    ti = os.environ.get("SLURM_ARRAY_TASK_ID", str(idx))
+    suffix = f"_j{aj}_t{ti}"
+    wn = _g(hp, "wandb_name")
+    if wn:
+        wn = wn[:200 - len(suffix)] + suffix
     else:
-        src = hp.get("source_job", "").strip()
-        stk = hp.get("source_task", "0").strip()
-        wandb_name = f"eval_{hp.get('dataset', 'unk')}_from{src}_{stk}{job_task_suffix}"
-
-    wandb_group = hp.get("wandb_group", "").strip() or f"eval_j{array_job}"
+        wn = f"eval_{_g(hp, 'dataset', 'unk')}_from{_g(hp, 'source_job')}_{_g(hp, 'source_task', '0')}{suffix}"
 
     os.environ.setdefault("WANDB_MODE", "online")
 
+    eps_raw = float(_g(hp, "adv_eps", "8"))
+    steps_raw = int(_g(hp, "adv_steps", "20"))
+    alpha_raw = _g(hp, "adv_alpha", "")
+    alpha_01 = float(alpha_raw) / 255.0 if alpha_raw else 2.5 * (eps_raw / 255.0) / max(steps_raw, 1)
+
     return argparse.Namespace(
-        job=hp.get("source_job", "").strip() or None,
-        task=hp.get("source_task", "0").strip(),
-        ckpt=None,
-        ckpt_dir=hp.get("ckpt_dir", "").strip() or None,
-        runs_dir=runs_dir,
-        slurm_logs_dir=slurm_logs_dir,
-        pattern=hp.get("pattern", "").strip() or "*_epoch*.pt",
-        dataset=hp.get("dataset", "").strip() or None,
-        device="cuda",
-        batch_size=int(hp.get("batch_size", "64").strip() or "64"),
-        attacks=hp.get("attacks", "fgsm,pgd_linf,pgd_linf_rs").strip(),
-        adv_eps=float(hp.get("adv_eps", "8").strip() or "8"),
-        adv_steps=int(hp.get("adv_steps", "20").strip() or "20"),
-        adv_pixel=True,
-        c_corruptions=hp.get("c_corruptions", "").strip(),
-        c_severity=int(hp.get("c_severity", "5").strip() or "5"),
-        imbalance=hp.get("imbalance", "none").strip() or "none",
-        output_csv=hp.get("output_csv", "").strip() or None,
+        job=_g(hp, "source_job") or None,
+        task=_g(hp, "source_task", "0"),
+        ckpt=None, ckpt_dir=_g(hp, "ckpt_dir") or None,
+        runs_dir=runs_dir, slurm_logs_dir=slurm_logs_dir,
+        pattern=_g(hp, "pattern", "*_epoch*.pt"),
+        dataset=_g(hp, "dataset") or None,
+        device="cuda", batch_size=int(_g(hp, "batch_size", "64")),
+        attacks=_g(hp, "attacks", "fgsm,pgd_linf,pgd_linf_rs"),
+        adv_eps=eps_raw, adv_steps=steps_raw, adv_alpha_01=alpha_01,
+        adv_restarts=int(_g(hp, "adv_restarts", "1")),
+        autoattack=_g(hp, "autoattack", ""),
+        autoattack_norm=_g(hp, "autoattack_norm", "Linf"),
+        c_corruptions=_g(hp, "c_corruptions"),
+        c_severity=int(_g(hp, "c_severity", "5")),
+        imbalance=_g(hp, "imbalance", "none"),
+        imb_factor=float(_g(hp, "imb_factor", "100")),
+        imb_seed=int(_g(hp, "imb_seed", "0")),
+        eval_calibration=_g(hp, "eval_calibration", "True").lower() in ("1", "true", "yes"),
+        eval_ecgs_diag=_g(hp, "eval_ecgs_diag", "True").lower() in ("1", "true", "yes"),
+        output_csv=_g(hp, "output_csv") or None,
         wandb_project=wandb_project or None,
-        wandb_name=wandb_name,
-        wandb_group=wandb_group,
+        wandb_name=wn,
+        wandb_group=_g(hp, "wandb_group", f"eval_j{aj}"),
     )
 
 
-# ---------------------------------------------------------------------------
+# ═══════════════════════════════════════════════════════════════════════════
 #  Main evaluation loop
-# ---------------------------------------------------------------------------
+# ═══════════════════════════════════════════════════════════════════════════
 
 def run_eval(args):
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
-    slurm_logs_dir = getattr(args, "slurm_logs_dir", None) or None
 
-    # --- Resolve checkpoints ---
+    # -- resolve checkpoints --
     if getattr(args, "job", None):
         ckpt_dir = resolve_job_models_dir(
-            args.runs_dir, args.job, args.task, slurm_logs_dir=slurm_logs_dir
-        )
+            args.runs_dir, args.job, args.task,
+            slurm_logs_dir=getattr(args, "slurm_logs_dir", None) or None)
         print(f"Resolved job={args.job} task={args.task} -> {ckpt_dir}")
         ckpts = find_checkpoints(ckpt_dir, getattr(args, "pattern", "*_epoch*.pt"))
     elif getattr(args, "ckpt", None):
@@ -532,43 +741,43 @@ def run_eval(args):
     elif getattr(args, "ckpt_dir", None):
         ckpts = find_checkpoints(args.ckpt_dir, args.pattern)
     else:
-        print("ERROR: No checkpoint source specified.")
-        return
+        print("ERROR: no checkpoint source"); return
 
     if not ckpts:
-        print("No checkpoints found.")
-        return
+        print("No checkpoints found."); return
 
     ds = args.dataset or detect_dataset(ckpts[0][1])
     if not ds:
-        print("Cannot detect dataset. Use --dataset.")
-        return
-    print(f"Dataset: {ds}  |  Checkpoints: {len(ckpts)}  |  Device: {device}")
+        print("Cannot detect dataset."); return
 
-    model, num_classes = build_model(ds, device)
-    test_loader, _, _ = build_test_loader(ds, batch_size=args.batch_size)
+    # -- build model + NormalizeModel wrapper --
+    raw_model, num_classes = build_model(ds, device)
+    mean, std = _get_norm_params(ds)
+    norm_model = NormalizeModel(raw_model, mean, std).to(device)
+
+    test_loader, _ = build_test_loader(ds, batch_size=args.batch_size)
+    print(f"Dataset: {ds}  |  Checkpoints: {len(ckpts)}  |  Device: {device}")
+    print(f"Normalization: mean={mean}  std={std}")
 
     attacks = [a.strip() for a in args.attacks.split(",") if a.strip()] if args.attacks else []
-    eps_01 = (args.adv_eps / 255.0) if args.adv_pixel else args.adv_eps
-    alpha = eps_01 * 2.5 / max(args.adv_steps, 1)
-
+    eps_01 = args.adv_eps / 255.0
+    alpha_01 = getattr(args, "adv_alpha_01", 2.5 * eps_01 / max(args.adv_steps, 1))
+    restarts = getattr(args, "adv_restarts", 1)
     corruptions = [c.strip() for c in args.c_corruptions.split(",") if c.strip()] if args.c_corruptions else []
 
-    # --- W&B ---
+    # -- W&B --
     use_wandb = bool(getattr(args, "wandb_project", None))
     if use_wandb:
         import wandb
-        wandb.init(
-            project=args.wandb_project,
-            entity=os.environ.get("WANDB_ENTITY", None),
-            name=getattr(args, "wandb_name", None) or f"eval_{ds}_{time.strftime('%m%d_%H%M')}",
-            group=getattr(args, "wandb_group", None) or "Eval",
-            job_type="eval",
-            config={k: v for k, v in vars(args).items() if not k.startswith("_")},
-        )
+        wandb.init(project=args.wandb_project,
+                   entity=os.environ.get("WANDB_ENTITY", None),
+                   name=getattr(args, "wandb_name", None) or f"eval_{ds}_{time.strftime('%m%d_%H%M')}",
+                   group=getattr(args, "wandb_group", None) or "Eval",
+                   job_type="eval",
+                   config={k: v for k, v in vars(args).items() if not k.startswith("_")})
         try:
             wandb.define_metric("epoch")
-            for pfx in ("STD/*", "PGD/*", "ADV/*", "C/*", "LT/*"):
+            for pfx in ("STD/*", "ADV/*", "C/*", "CAL/*", "LT/*", "DIAG/*", "AA/*"):
                 wandb.define_metric(pfx, step_metric="epoch")
         except Exception:
             pass
@@ -576,58 +785,88 @@ def run_eval(args):
     csv_rows = []
 
     for epoch, ckpt_path in ckpts:
-        print(f"\n{'=' * 60}")
-        print(f"  Epoch {epoch}  |  {os.path.basename(ckpt_path)}")
-        print(f"{'=' * 60}")
-
+        print(f"\n{'=' * 60}\n  Epoch {epoch}  |  {os.path.basename(ckpt_path)}\n{'=' * 60}")
         ckpt = torch.load(ckpt_path, map_location="cpu")
-        model.load_state_dict(ckpt["state_dict"])
-        model.eval()
+        raw_model.load_state_dict(ckpt["state_dict"])
+        norm_model.eval()
+        row = {"epoch": epoch}
 
-        row = {"epoch": epoch, "ckpt": os.path.basename(ckpt_path)}
+        # ── STD ──
+        row.update(eval_standard(norm_model, test_loader, device))
+        print(f"  STD  Error={row['STD/Error']:.4f}  Acc={row['STD/Acc']:.4f}")
 
-        std_err, std_loss = eval_standard(model, test_loader, device)
-        row["STD/Error"] = std_err
-        row["STD/Loss"] = std_loss
-        print(f"  STD  Error={std_err:.4f}  Loss={std_loss:.4f}")
-
+        # ── ADV suite ──
         for atk in attacks:
             t0 = time.time()
-            adv_err, adv_loss = eval_adversarial(
-                model, test_loader, device, eps_01, alpha, args.adv_steps, attack_type=atk
-            )
+            res = eval_adversarial(norm_model, test_loader, device,
+                                   eps_01, alpha_01, args.adv_steps, atk, restarts)
             dt = time.time() - t0
-            prefix = f"ADV/{atk}/eps{int(args.adv_eps)}"
+            pfx = f"ADV/{atk}/eps{int(args.adv_eps)}"
             if "pgd" in atk:
-                prefix += f"/steps{args.adv_steps}"
-            row[f"{prefix}/Error"] = adv_err
-            row[f"{prefix}/Acc"] = 1.0 - adv_err
-            row[f"{prefix}/Loss"] = adv_loss
-            print(f"  {atk:15s}  Error={adv_err:.4f}  Acc={1.0 - adv_err:.4f}  ({dt:.1f}s)")
+                pfx += f"/steps{args.adv_steps}"
+            for k, v in res.items():
+                row[f"{pfx}/{k}"] = v
+            print(f"  {atk:15s}  Err={res['Error']:.4f}  Acc={res['Acc']:.4f}  ({dt:.1f}s)")
 
+        # ── AutoAttack (optional) ──
+        aa_flag = getattr(args, "autoattack", "").strip().lower()
+        if aa_flag in ("1", "true", "yes", "linf", "l2", "both"):
+            norms = []
+            if aa_flag in ("1", "true", "yes", "linf", "both"):
+                norms.append("Linf")
+            if aa_flag in ("l2", "both"):
+                norms.append("L2")
+            for aa_norm in norms:
+                aa_eps = eps_01 if aa_norm == "Linf" else eps_01 * 4
+                t0 = time.time()
+                aa_res = eval_autoattack(norm_model, test_loader, device, aa_eps, norm=aa_norm)
+                dt = time.time() - t0
+                if aa_res:
+                    for k, v in aa_res.items():
+                        row[f"AA/{aa_norm}/{k}"] = v
+                    print(f"  AA-{aa_norm:4s}  Err={aa_res['Error']:.4f}  Acc={aa_res['Acc']:.4f}  ({dt:.1f}s)")
+
+        # ── C-suite ──
         for corr in corruptions:
-            result = eval_corruption(model, device, ds, corr, args.c_severity, args.batch_size)
-            if result is not None:
-                c_err, c_loss = result
-                row[f"C/{corr}/s{args.c_severity}/Error"] = c_err
-                row[f"C/{corr}/s{args.c_severity}/Acc"] = 1.0 - c_err
-                row[f"C/{corr}/s{args.c_severity}/Loss"] = c_loss
-                print(f"  C/{corr}/s{args.c_severity}  Error={c_err:.4f}")
+            res = eval_corruption(norm_model, device, ds, corr, args.c_severity, args.batch_size)
+            if res:
+                for k, v in res.items():
+                    row[f"C/{corr}/s{args.c_severity}/{k}"] = v
+                print(f"  C/{corr}/s{args.c_severity}  Err={res['Error']:.4f}")
 
+        # ── Calibration ──
+        if getattr(args, "eval_calibration", True):
+            cal = eval_calibration(norm_model, test_loader, device)
+            row.update(cal)
+            print(f"  CAL  ECE={cal['CAL/ECE']:.4f}  NLL={cal['CAL/NLL']:.4f}  Brier={cal['CAL/Brier']:.4f}")
+
+        # ── LT ──
         imbalance = getattr(args, "imbalance", "none") or "none"
-        if imbalance.strip().lower() != "none":
-            lt = eval_longtail(model, test_loader, device, num_classes)
-            for k, v in lt.items():
-                row[f"LT/{k}"] = v
-            print(f"  LT  BalAcc={lt['BalancedAcc']:.4f}  Many={lt['ManyAcc']:.4f}"
-                  f"  Med={lt['MediumAcc']:.4f}  Few={lt['FewAcc']:.4f}")
+        if imbalance.strip().lower() != "none" or getattr(args, "eval_calibration", True):
+            lt = eval_longtail(norm_model, test_loader, device, num_classes,
+                               imbalance, getattr(args, "imb_factor", 100),
+                               getattr(args, "imb_seed", 0))
+            row.update({k: v for k, v in lt.items() if not k.startswith("_")})
+            print(f"  LT  BalAcc={lt['LT/BalancedAcc']:.4f}  std={lt['LT/PerClassAcc_std']:.4f}"
+                  f"  min={lt['LT/PerClassAcc_min']:.4f}  max={lt['LT/PerClassAcc_max']:.4f}")
+            if "LT/ManyAcc" in lt:
+                print(f"      Many={lt['LT/ManyAcc']:.4f}  Med={lt['LT/MediumAcc']:.4f}  Few={lt['LT/FewAcc']:.4f}"
+                      f"  (diagnostic only)")
+
+        # ── ECGS diagnostics ──
+        if getattr(args, "eval_ecgs_diag", True):
+            diag = eval_ecgs_diagnostics(norm_model, test_loader, device)
+            row.update(diag)
+            print(f"  DIAG pmax={diag['DIAG/pmax_mean']:.4f}±{diag['DIAG/pmax_std']:.4f}"
+                  f"  lgap={diag['DIAG/logit_gap_mean']:.2f}±{diag['DIAG/logit_gap_std']:.2f}"
+                  f"  ent={diag['DIAG/entropy_mean']:.4f}")
 
         csv_rows.append(row)
-
         if use_wandb:
             import wandb
-            wandb.log({k: v for k, v in row.items() if k != "ckpt"}, step=epoch)
+            wandb.log(row, step=epoch)
 
+    # ── CSV output ──
     output_csv = getattr(args, "output_csv", None)
     if output_csv:
         os.makedirs(os.path.dirname(output_csv) or ".", exist_ok=True)
@@ -640,64 +879,68 @@ def run_eval(args):
             f.write("\t".join(all_keys) + "\n")
             for r in csv_rows:
                 f.write("\t".join(str(r.get(k, "")) for k in all_keys) + "\n")
-        print(f"\nResults saved to {output_csv}")
+        print(f"\nSaved to {output_csv}")
 
     if use_wandb:
         import wandb
         wandb.finish()
-        print("W&B run finished.")
 
-    print(f"\nDone. Evaluated {len(ckpts)} checkpoints.")
+    print(f"\nDone. {len(ckpts)} checkpoints evaluated.")
 
 
-# ---------------------------------------------------------------------------
+# ═══════════════════════════════════════════════════════════════════════════
 #  CLI
-# ---------------------------------------------------------------------------
+# ═══════════════════════════════════════════════════════════════════════════
 
 def main():
-    parser = argparse.ArgumentParser(description="Offline checkpoint evaluator: ADV / C / LT")
+    p = argparse.ArgumentParser(description="Offline checkpoint evaluator v2")
+    p.add_argument("--conf", type=str, help="Eval TSV (batch mode)")
+    p.add_argument("--idx", type=int, help="Row index in TSV")
+    g = p.add_mutually_exclusive_group()
+    g.add_argument("--ckpt", type=str)
+    g.add_argument("--ckpt_dir", type=str)
+    g.add_argument("--job", type=str)
+    p.add_argument("--task", type=str, default="0")
+    p.add_argument("--runs_dir", type=str, default=DEFAULT_RUNS_DIR)
+    p.add_argument("--slurm_logs_dir", type=str, default="")
+    p.add_argument("--pattern", type=str, default="*_epoch*.pt")
+    p.add_argument("--dataset", type=str, choices=list(DATASET_STATS.keys()))
+    p.add_argument("--device", type=str, default="cuda")
+    p.add_argument("--batch_size", type=int, default=64)
+    p.add_argument("--attacks", type=str, default="fgsm,pgd_linf,pgd_linf_rs")
+    p.add_argument("--adv_eps", type=float, default=8, help="Epsilon in pixel units [0,255]")
+    p.add_argument("--adv_steps", type=int, default=20)
+    p.add_argument("--adv_alpha", type=float, default=0, help="Step size in pixel units (0=auto)")
+    p.add_argument("--adv_restarts", type=int, default=1)
+    p.add_argument("--autoattack", type=str, default="", help="Linf|L2|both|True to run AutoAttack")
+    p.add_argument("--autoattack_norm", type=str, default="Linf")
+    p.add_argument("--c_corruptions", type=str, default="")
+    p.add_argument("--c_severity", type=int, default=5)
+    p.add_argument("--imbalance", type=str, default="none")
+    p.add_argument("--imb_factor", type=float, default=100)
+    p.add_argument("--imb_seed", type=int, default=0)
+    p.add_argument("--eval_calibration", type=str, default="True")
+    p.add_argument("--eval_ecgs_diag", type=str, default="True")
+    p.add_argument("--output_csv", type=str, default=None)
+    p.add_argument("--wandb_project", type=str, default=None)
+    p.add_argument("--wandb_name", type=str, default=None)
+    p.add_argument("--wandb_group", type=str, default=None)
 
-    parser.add_argument("--conf", type=str, default=None, help="Eval TSV (batch mode).")
-    parser.add_argument("--idx", type=int, default=None, help="Row index in TSV (0-based).")
-
-    g = parser.add_mutually_exclusive_group()
-    g.add_argument("--ckpt", type=str, help="Single checkpoint path.")
-    g.add_argument("--ckpt_dir", type=str, help="Directory containing checkpoints.")
-    g.add_argument("--job", type=str, help="SLURM array-job ID.")
-
-    parser.add_argument("--task", type=str, default="0")
-    parser.add_argument("--runs_dir", type=str, default=DEFAULT_RUNS_DIR)
-    parser.add_argument("--slurm_logs_dir", type=str, default="")
-
-    parser.add_argument("--pattern", type=str, default="*_epoch*.pt")
-    parser.add_argument("--dataset", type=str, default=None,
-                        choices=["cifar10", "binaryCifar10", "cifar100", "svhn", "imageNet"])
-    parser.add_argument("--device", type=str, default="cuda")
-    parser.add_argument("--batch_size", type=int, default=64)
-
-    parser.add_argument("--attacks", type=str, default="fgsm,pgd_linf,pgd_linf_rs")
-    parser.add_argument("--adv_eps", type=float, default=8)
-    parser.add_argument("--adv_steps", type=int, default=20)
-    parser.add_argument("--adv_pixel", action="store_true", default=True)
-
-    parser.add_argument("--c_corruptions", type=str, default="")
-    parser.add_argument("--c_severity", type=int, default=5)
-
-    parser.add_argument("--imbalance", type=str, default="none")
-
-    parser.add_argument("--output_csv", type=str, default=None)
-    parser.add_argument("--wandb_project", type=str, default=None)
-    parser.add_argument("--wandb_name", type=str, default=None)
-    parser.add_argument("--wandb_group", type=str, default=None)
-
-    args = parser.parse_args()
+    args = p.parse_args()
 
     if args.conf is not None:
         if args.idx is None:
-            parser.error("--idx required with --conf")
+            p.error("--idx required with --conf")
         args = args_from_tsv(args.conf, args.idx)
-    elif not any([args.job, args.ckpt, args.ckpt_dir]):
-        parser.error("Specify: --conf+--idx, --job, --ckpt, or --ckpt_dir")
+    else:
+        eps_01 = args.adv_eps / 255.0
+        args.adv_alpha_01 = (args.adv_alpha / 255.0) if args.adv_alpha > 0 else (2.5 * eps_01 / max(args.adv_steps, 1))
+        args.eval_calibration = args.eval_calibration.lower() in ("1", "true", "yes")
+        args.eval_ecgs_diag = args.eval_ecgs_diag.lower() in ("1", "true", "yes")
+
+    if not any([getattr(args, "job", None), getattr(args, "ckpt", None),
+                getattr(args, "ckpt_dir", None)]):
+        p.error("Specify: --conf+--idx, --job, --ckpt, or --ckpt_dir")
 
     run_eval(args)
 
