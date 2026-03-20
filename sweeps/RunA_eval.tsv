@@ -2,35 +2,35 @@
 #runs_dir=/ocean/projects/cis260049p/zliu49/cegs_runs
 #data_dir=/ocean/projects/cis260049p/zliu49/cegs
 dataset	source_job	source_task	attacks	adv_eps	adv_steps	c_corruptions	c_severity	imbalance	wandb_project	wandb_group	wandb_name	env_IMAGENET_ORIGINAL	env_IMAGENET_RES	env_IMAGENET_DS_ROOT	env_DL_WORKERS
-binaryCifar10	37988109	0	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval-balanced	Balanced_Eval	eval_binary_CE_150ep_from37988109_0				
-binaryCifar10	37988109	0	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval-balanced	Balanced_Eval	eval_binary_CE_150ep_from37988109_0_eps2				
-binaryCifar10	38017823	1	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval-balanced	Balanced_Eval	eval_binary_ECGS_autocap_q76_k20_150ep_from38017823_1				
-binaryCifar10	38017823	1	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval-balanced	Balanced_Eval	eval_binary_ECGS_autocap_q76_k20_150ep_from38017823_1_eps2				
-cifar10	37990933	0	fgsm,pgd_linf,pgd_linf_rs	4	20	gaussian_noise,brightness	5	none	ecgs-eval-balanced	Balanced_Eval	eval_cifar10_CE_60ep_from37990933_0				
-cifar10	37990933	0	fgsm,pgd_linf,pgd_linf_rs	2	20	gaussian_noise,brightness	5	none	ecgs-eval-balanced	Balanced_Eval	eval_cifar10_CE_60ep_from37990933_0_eps2				
-cifar10	38012986	6	fgsm,pgd_linf,pgd_linf_rs	4	20	gaussian_noise,brightness	5	none	ecgs-eval-balanced	Balanced_Eval	eval_cifar10_ECGS_autocap_q77_k20_60ep_from38012986_6				
-cifar10	38012986	6	fgsm,pgd_linf,pgd_linf_rs	2	20	gaussian_noise,brightness	5	none	ecgs-eval-balanced	Balanced_Eval	eval_cifar10_ECGS_autocap_q77_k20_60ep_from38012986_6_eps2				
-cifar100	38017077	0	fgsm,pgd_linf,pgd_linf_rs	4	20	gaussian_noise,brightness	5	none	ecgs-eval-balanced	Balanced_Eval	eval_cifar100_CE_lr001_60ep_from38017077_0				
-cifar100	38017077	0	fgsm,pgd_linf,pgd_linf_rs	2	20	gaussian_noise,brightness	5	none	ecgs-eval-balanced	Balanced_Eval	eval_cifar100_CE_lr001_60ep_from38017077_0_eps2				
-cifar100	38019954	3	fgsm,pgd_linf,pgd_linf_rs	4	20	gaussian_noise,brightness	5	none	ecgs-eval-balanced	Balanced_Eval	eval_cifar100_ECGS_autocap_q71_k20_lr001_60ep_from38019954_3				
-cifar100	38019954	3	fgsm,pgd_linf,pgd_linf_rs	2	20	gaussian_noise,brightness	5	none	ecgs-eval-balanced	Balanced_Eval	eval_cifar100_ECGS_autocap_q71_k20_lr001_60ep_from38019954_3_eps2				
-cifar100	37991463	0	fgsm,pgd_linf,pgd_linf_rs	4	20	gaussian_noise,brightness	5	none	ecgs-eval-balanced	Balanced_Eval	eval_cifar100_CE_lr01_60ep_from37991463_0				
-cifar100	37991463	0	fgsm,pgd_linf,pgd_linf_rs	2	20	gaussian_noise,brightness	5	none	ecgs-eval-balanced	Balanced_Eval	eval_cifar100_CE_lr01_60ep_from37991463_0_eps2				
-cifar100	38007062	1	fgsm,pgd_linf,pgd_linf_rs	4	20	gaussian_noise,brightness	5	none	ecgs-eval-balanced	Balanced_Eval	eval_cifar100_ECGS_autocap_q70_k20_lr01_60ep_from38007062_1				
-cifar100	38007062	1	fgsm,pgd_linf,pgd_linf_rs	2	20	gaussian_noise,brightness	5	none	ecgs-eval-balanced	Balanced_Eval	eval_cifar100_ECGS_autocap_q70_k20_lr01_60ep_from38007062_1_eps2				
-svhn	37991813	0	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval-balanced	Balanced_Eval	eval_svhn_CE_60ep_from37991813_0				
-svhn	37991813	0	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval-balanced	Balanced_Eval	eval_svhn_CE_60ep_from37991813_0_eps2				
-svhn	38017315	0	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval-balanced	Balanced_Eval	eval_svhn_ECGS_autocap_q80_k20_60ep_from38017315_0				
-svhn	38017315	0	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval-balanced	Balanced_Eval	eval_svhn_ECGS_autocap_q80_k20_60ep_from38017315_0_eps2				
-svhn	38084356	1	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval-balanced	Balanced_Eval	eval_svhn_ECGS_autocap_q80_k20_50ep_from38084356_1				
-svhn	38084356	1	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval-balanced	Balanced_Eval	eval_svhn_ECGS_autocap_q80_k20_50ep_from38084356_1_eps2				
-svhn	38064246	6	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval-balanced	Balanced_Eval	eval_svhn_ECGS_autocap_q80-85_k20_55ep_from38064246_6				
-svhn	38064246	6	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval-balanced	Balanced_Eval	eval_svhn_ECGS_autocap_q80-85_k20_55ep_from38064246_6_eps2				
-imageNet	37974226	0	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval-balanced	Balanced_Eval	eval_imnet32_CE_60ep_from37974226_0	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	0
-imageNet	37974226	0	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval-balanced	Balanced_Eval	eval_imnet32_CE_60ep_from37974226_0_eps2	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	0
-imageNet	38020038	0	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval-balanced	Balanced_Eval	eval_imnet32_ECGS_autocap_q38_k20_60ep_from38020038_0	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	0
-imageNet	38020038	0	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval-balanced	Balanced_Eval	eval_imnet32_ECGS_autocap_q38_k20_60ep_from38020038_0_eps2	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	0
-imageNet	38037317	0	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval-balanced	Balanced_Eval	eval_imnet32_ECGS_autocap_q38-70_k20_60ep_from38037317_0	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	0
-imageNet	38037317	0	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval-balanced	Balanced_Eval	eval_imnet32_ECGS_autocap_q38-70_k20_60ep_from38037317_0_eps2	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	0
-imageNet	38037317	2	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval-balanced	Balanced_Eval	eval_imnet32_ECGS_autocap_q38-80_k20_60ep_from38037317_2	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	0
-imageNet	38037317	2	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval-balanced	Balanced_Eval	eval_imnet32_ECGS_autocap_q38-80_k20_60ep_from38037317_2_eps2	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	0
+binaryCifar10	37988109	0	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval	Eval	eval_binary_CE_150ep_from37988109_0				
+binaryCifar10	37988109	0	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval	Eval	eval_binary_CE_150ep_from37988109_0_eps2				
+binaryCifar10	38017823	1	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval	Eval	eval_binary_ECGS_autocap_q76_k20_150ep_from38017823_1				
+binaryCifar10	38017823	1	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval	Eval	eval_binary_ECGS_autocap_q76_k20_150ep_from38017823_1_eps2				
+cifar10	37990933	0	fgsm,pgd_linf,pgd_linf_rs	4	20	gaussian_noise,brightness	5	exp	ecgs-eval	Eval	eval_cifar10_CE_60ep_from37990933_0				
+cifar10	37990933	0	fgsm,pgd_linf,pgd_linf_rs	2	20	gaussian_noise,brightness	5	exp	ecgs-eval	Eval	eval_cifar10_CE_60ep_from37990933_0_eps2				
+cifar10	38012986	6	fgsm,pgd_linf,pgd_linf_rs	4	20	gaussian_noise,brightness	5	exp	ecgs-eval	Eval	eval_cifar10_ECGS_autocap_q77_k20_60ep_from38012986_6				
+cifar10	38012986	6	fgsm,pgd_linf,pgd_linf_rs	2	20	gaussian_noise,brightness	5	exp	ecgs-eval	Eval	eval_cifar10_ECGS_autocap_q77_k20_60ep_from38012986_6_eps2				
+cifar100	38017077	0	fgsm,pgd_linf,pgd_linf_rs	4	20	gaussian_noise,brightness	5	exp	ecgs-eval	Eval	eval_cifar100_CE_lr001_60ep_from38017077_0				
+cifar100	38017077	0	fgsm,pgd_linf,pgd_linf_rs	2	20	gaussian_noise,brightness	5	exp	ecgs-eval	Eval	eval_cifar100_CE_lr001_60ep_from38017077_0_eps2				
+cifar100	38019954	3	fgsm,pgd_linf,pgd_linf_rs	4	20	gaussian_noise,brightness	5	exp	ecgs-eval	Eval	eval_cifar100_ECGS_autocap_q71_k20_lr001_60ep_from38019954_3				
+cifar100	38019954	3	fgsm,pgd_linf,pgd_linf_rs	2	20	gaussian_noise,brightness	5	exp	ecgs-eval	Eval	eval_cifar100_ECGS_autocap_q71_k20_lr001_60ep_from38019954_3_eps2				
+cifar100	37991463	0	fgsm,pgd_linf,pgd_linf_rs	4	20	gaussian_noise,brightness	5	exp	ecgs-eval	Eval	eval_cifar100_CE_lr01_60ep_from37991463_0				
+cifar100	37991463	0	fgsm,pgd_linf,pgd_linf_rs	2	20	gaussian_noise,brightness	5	exp	ecgs-eval	Eval	eval_cifar100_CE_lr01_60ep_from37991463_0_eps2				
+cifar100	38007062	1	fgsm,pgd_linf,pgd_linf_rs	4	20	gaussian_noise,brightness	5	exp	ecgs-eval	Eval	eval_cifar100_ECGS_autocap_q70_k20_lr01_60ep_from38007062_1				
+cifar100	38007062	1	fgsm,pgd_linf,pgd_linf_rs	2	20	gaussian_noise,brightness	5	exp	ecgs-eval	Eval	eval_cifar100_ECGS_autocap_q70_k20_lr01_60ep_from38007062_1_eps2				
+svhn	37991813	0	fgsm,pgd_linf,pgd_linf_rs	4	20			exp	ecgs-eval	Eval	eval_svhn_CE_60ep_from37991813_0				
+svhn	37991813	0	fgsm,pgd_linf,pgd_linf_rs	2	20			exp	ecgs-eval	Eval	eval_svhn_CE_60ep_from37991813_0_eps2				
+svhn	38017315	0	fgsm,pgd_linf,pgd_linf_rs	4	20			exp	ecgs-eval	Eval	eval_svhn_ECGS_autocap_q80_k20_60ep_from38017315_0				
+svhn	38017315	0	fgsm,pgd_linf,pgd_linf_rs	2	20			exp	ecgs-eval	Eval	eval_svhn_ECGS_autocap_q80_k20_60ep_from38017315_0_eps2				
+svhn	38084356	1	fgsm,pgd_linf,pgd_linf_rs	4	20			exp	ecgs-eval	Eval	eval_svhn_ECGS_autocap_q80_k20_50ep_from38084356_1				
+svhn	38084356	1	fgsm,pgd_linf,pgd_linf_rs	2	20			exp	ecgs-eval	Eval	eval_svhn_ECGS_autocap_q80_k20_50ep_from38084356_1_eps2				
+svhn	38064246	6	fgsm,pgd_linf,pgd_linf_rs	4	20			exp	ecgs-eval	Eval	eval_svhn_ECGS_autocap_q80-85_k20_55ep_from38064246_6				
+svhn	38064246	6	fgsm,pgd_linf,pgd_linf_rs	2	20			exp	ecgs-eval	Eval	eval_svhn_ECGS_autocap_q80-85_k20_55ep_from38064246_6_eps2				
+imageNet	37974226	0	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval	Eval	eval_imnet32_CE_60ep_from37974226_0	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	0
+imageNet	37974226	0	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval	Eval	eval_imnet32_CE_60ep_from37974226_0_eps2	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	0
+imageNet	38020038	0	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval	Eval	eval_imnet32_ECGS_autocap_q38_k20_60ep_from38020038_0	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	0
+imageNet	38020038	0	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval	Eval	eval_imnet32_ECGS_autocap_q38_k20_60ep_from38020038_0_eps2	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	0
+imageNet	38037317	0	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval	Eval	eval_imnet32_ECGS_autocap_q38-70_k20_60ep_from38037317_0	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	0
+imageNet	38037317	0	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval	Eval	eval_imnet32_ECGS_autocap_q38-70_k20_60ep_from38037317_0_eps2	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	0
+imageNet	38037317	2	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval	Eval	eval_imnet32_ECGS_autocap_q38-80_k20_60ep_from38037317_2	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	0
+imageNet	38037317	2	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval	Eval	eval_imnet32_ECGS_autocap_q38-80_k20_60ep_from38037317_2_eps2	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	0
