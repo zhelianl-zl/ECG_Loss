@@ -314,12 +314,13 @@ def _pgd_linf(norm_model: nn.Module, X: torch.Tensor, y: torch.Tensor,
     return delta.detach()
 
 
-def _pgd_with_restarts(norm_model, X, y, eps, alpha, num_iter, restarts):
+def _pgd_with_restarts(norm_model, X, y, eps, alpha, num_iter, restarts, random_start=True):
     best_delta = torch.zeros_like(X)
     best_loss = torch.full((X.shape[0],), -float("inf"), device=X.device)
 
     for r in range(restarts):
-        delta = _pgd_linf(norm_model, X, y, eps, alpha, num_iter, random_start=(restarts > 1 or r > 0))
+        rs = random_start or r > 0
+        delta = _pgd_linf(norm_model, X, y, eps, alpha, num_iter, random_start=rs)
         with torch.no_grad():
             loss_i = F.cross_entropy(norm_model(X + delta), y, reduction="none")
         improved = loss_i > best_loss
@@ -356,9 +357,11 @@ def eval_adversarial(norm_model, loader, device, eps_01, alpha_01, num_iter,
         if attack_type == "fgsm":
             delta = _fgsm(norm_model, X, y, eps_01)
         elif attack_type == "pgd_linf_rs":
-            delta = _pgd_with_restarts(norm_model, X, y, eps_01, alpha_01, num_iter, max(restarts, 1))
+            delta = _pgd_with_restarts(norm_model, X, y, eps_01, alpha_01, num_iter,
+                                       max(restarts, 1), random_start=True)
         else:
-            delta = _pgd_with_restarts(norm_model, X, y, eps_01, alpha_01, num_iter, restarts)
+            delta = _pgd_with_restarts(norm_model, X, y, eps_01, alpha_01, num_iter,
+                                       restarts, random_start=False)
         with torch.no_grad():
             out = norm_model((X + delta).clamp(0.0, 1.0))
             total_err += (out.argmax(1) != y).sum().item()
