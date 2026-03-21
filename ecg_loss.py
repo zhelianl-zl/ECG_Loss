@@ -14,7 +14,7 @@ class ScaleGrad(torch.autograd.Function):
         return grad_output * scale, None
 
 
-def ecg_loss(logits, targets, lam=1.0, tau=0.7, k=10.0, conf_type="pmax", detach_gates=True, eps=1e-8, tau_quantile=None, scale_normalize=False, gate_temp=1.5):
+def ecg_loss(logits, targets, lam=1.0, tau=0.7, k=10.0, conf_type="pmax", detach_gates=True, eps=1e-8, tau_quantile=None, scale_normalize=False, gate_temp=1.5, minimal_stats=False):
     """
     tau_quantile: if set (e.g. 0.8), tau is set to this quantile of conf (pmax) per batch, reducing tau tuning.
     scale_normalize: if True, scale is normalized so mean(scale)=1 (for auto-lambda; keeps global step size unchanged).
@@ -23,8 +23,6 @@ def ecg_loss(logits, targets, lam=1.0, tau=0.7, k=10.0, conf_type="pmax", detach
 
     p = F.softmax(logits, dim=1)
     py = p.gather(1, targets[:, None]).squeeze(1)
-
-    ce = F.cross_entropy(logits, targets, reduction="none")
 
     # confidence
     if conf_type == "pmax":
@@ -81,48 +79,52 @@ def ecg_loss(logits, targets, lam=1.0, tau=0.7, k=10.0, conf_type="pmax", detach
 
     loss = F.cross_entropy(scaled_logits, targets)
 
-    # gate_mean from detached gate (for auto-lambda EMA; avoid graph retention)
+    # --- control stats (always computed; used by auto-lambda / auto_tr) ---
     g_flat = gate.detach().float().view(-1)
     gate_mean_val = g_flat.mean().item()
     if g_flat.numel() <= 1:
         gate_p95_val = g_flat.item() if g_flat.numel() == 1 else 0.0
         gate_p99_val = gate_p95_val
-        gate_std_val = 0.0
     else:
         gate_p95_val = torch.quantile(g_flat, 0.95).item()
         gate_p99_val = torch.quantile(g_flat, 0.99).item()
-        gate_std_val = g_flat.std().item()
-    c_flat = conf.detach().float().view(-1)
-    conf_p90_val = torch.quantile(c_flat, 0.90).item() if c_flat.numel() > 1 else c_flat.mean().item()
-    conf_p95_val = torch.quantile(c_flat, 0.95).item() if c_flat.numel() > 1 else c_flat.mean().item()
+    active_frac_val = (conf_gate > 0.5).float().mean().item()
+
     stats = {
         "gate_mean": gate_mean_val,
         "gate_p95": gate_p95_val,
         "gate_p99": gate_p99_val,
-        "gate_std": gate_std_val,
-        "wrong_mean": wrong_gate.mean().item(),
-        "conf_mean": conf.mean().item(),
-        "conf_p90": conf_p90_val,
-        "conf_p95": conf_p95_val,
-        "tau_threshold": float(tau) if not isinstance(tau, torch.Tensor) else tau.item(),
-        "ecg_gate_temp": float(gate_temp) if conf_type == "pmax_temp" else 0.0,
-        "logit_gap_mean": gap_mean.item() if conf_type == "logit_gap_norm" else 0.0,
-        "logit_gap_std": gap_std.item() if conf_type == "logit_gap_norm" else 0.0,
-        "conf_gate_mean": conf_gate.mean().item(),
-        "conf_gate_active_frac": (conf_gate > 0.5).float().mean().item(),
-        "scale_mean": scale.mean().item(),
-        "ce_mean": ce.mean().item(),
+        "conf_gate_active_frac": active_frac_val,
     }
     if scale_normalize:
-        stats["scale_std_after_norm"] = scale.detach().std().item() if scale.numel() > 1 else 0.0
-        # Tail strength for diagnosing auto-lambda (logging only; no graph)
         s_flat = scale.detach().float().view(-1)
-        if s_flat.numel() == 0:
-            stats["scale_p99_after_norm"] = 0.0
-        elif s_flat.numel() == 1:
-            stats["scale_p99_after_norm"] = s_flat.item()
+        if s_flat.numel() <= 1:
+            stats["scale_p99_after_norm"] = s_flat.item() if s_flat.numel() == 1 else 0.0
         else:
             stats["scale_p99_after_norm"] = torch.quantile(s_flat, 0.99).item()
+
+    # --- logging-only stats (skipped when minimal_stats=True) ---
+    if not minimal_stats:
+        gate_std_val = g_flat.std().item() if g_flat.numel() > 1 else 0.0
+        c_flat = conf.detach().float().view(-1)
+        conf_p90_val = torch.quantile(c_flat, 0.90).item() if c_flat.numel() > 1 else c_flat.mean().item()
+        conf_p95_val = torch.quantile(c_flat, 0.95).item() if c_flat.numel() > 1 else c_flat.mean().item()
+        stats.update({
+            "gate_std": gate_std_val,
+            "wrong_mean": wrong_gate.mean().item(),
+            "conf_mean": conf.mean().item(),
+            "conf_p90": conf_p90_val,
+            "conf_p95": conf_p95_val,
+            "tau_threshold": float(tau) if not isinstance(tau, torch.Tensor) else tau.item(),
+            "ecg_gate_temp": float(gate_temp) if conf_type == "pmax_temp" else 0.0,
+            "logit_gap_mean": gap_mean.item() if conf_type == "logit_gap_norm" else 0.0,
+            "logit_gap_std": gap_std.item() if conf_type == "logit_gap_norm" else 0.0,
+            "conf_gate_mean": conf_gate.mean().item(),
+            "scale_mean": scale.mean().item(),
+            "ce_mean": loss.item(),
+        })
+        if scale_normalize:
+            stats["scale_std_after_norm"] = scale.detach().std().item() if scale.numel() > 1 else 0.0
 
     return loss, stats
 
