@@ -72,7 +72,10 @@ from ensemble_fusion import FusionClassifier, AdversarialTrainingClassifier
 from cals import AugLagrangian, AugLagrangianClass
 
 from ecg_loss import ecg_loss
+from robust_losses import focal_loss, clue_lite_loss, trades_loss, mart_loss, pgd_attack_ce
 LOSS_ECG = "ecg"
+LOSS_FOCAL = "focal"
+LOSS_CLUE_LITE = "clue_lite"
 _AUTO_LAM_RULES = ("auto", "auto_w", "auto_d", "auto_dw", "auto_tr", "auto_tr_sustain", "auto_tr_autocap", "auto_tr_autocap_gate")
 
 # --- PE mode switches ---
@@ -2169,11 +2172,58 @@ class trainModel():
         write_pred_logs = True
 
         # ===== STAGE2 hard skip for sanity =====
-        max_stage2_epochs = int(getattr(self, "stage2_epochs", 0))  # 默认 0
+        max_stage2_epochs = int(getattr(self, "stage2_epochs", 0))
         if max_stage2_epochs <= 0:
             print("[STAGE2] skipped because stage2_epochs=0", flush=True)
             return time.time() - t1, train_err, train_loss
         # ======================================
+
+        # ===== ROBUST TRAINING STAGE2 (PGD-AT / TRADES / MART) =====
+        _train_mode = getattr(self, "train_mode", "standard")
+        if _train_mode in ("pgd_at", "trades", "mart"):
+            print(f"[STAGE2-ROBUST] method={_train_mode}  eps={getattr(self, 'robust_eps', 0):.4f}"
+                  f"  alpha={getattr(self, 'robust_alpha', 0):.4f}  steps={getattr(self, 'robust_steps', 10)}"
+                  f"  beta={getattr(self, 'robust_beta', 6.0)}", flush=True)
+            for ep in range(1, max_stage2_epochs + 1):
+                global_epoch = ep + iterations
+                self._current_epoch = global_epoch
+                self._ecg_on_epoch_begin(global_epoch)
+                print(f"epoch number {global_epoch} (robust {_train_mode})")
+
+                rob_err, rob_loss, _ = self.epoch_robust(
+                    loader.train_loader, model, opt, method=_train_mode)
+
+                test_err, test_loss, test_entropy, test_MI, test_extra = self.test_epoch(
+                    loader.test_loader, model, num_samples=5, return_details=True)
+                self._ecg_on_epoch_end(global_epoch, metric=test_err)
+
+                try:
+                    if wandb.run is not None:
+                        log_dict = {
+                            "train/loss": rob_loss, "train/err": rob_err,
+                            "STD/Error": test_err, "STD/Loss": test_loss,
+                            "robust/eps": getattr(self, "robust_eps", 0),
+                            "robust/method": _train_mode,
+                            "epoch": global_epoch, "stage": 2,
+                        }
+                        wandb.log(log_dict, step=global_epoch)
+                except Exception:
+                    pass
+
+                if ep % 5 == 0 or ep == max_stage2_epochs:
+                    self.saveModel(True, {
+                        'epoch': global_epoch,
+                        'state_dict': model.state_dict(),
+                        'training_time': time.time() - t1,
+                        'error': rob_err,
+                        'loss': rob_loss,
+                        'optimizer': opt.state_dict(),
+                    }, ckptName, global_epoch)
+
+                self._run_extra_evals(global_epoch, dataset, model, loader)
+
+            return time.time() - t1, rob_err, rob_loss
+        # ============================================================
 
         if option_stage2 == 'batch_mix2':
             #separetes into different batchs the wrong and correct predicitons and uses differetn loss functions
@@ -3391,9 +3441,102 @@ class trainModel():
             return _rt_ret(Certainty_Loss()(model, X, y, y_pred, num_samples))
         elif self.LossInUse == LOSS_MIN_BINARYCROSSENT:
             return _rt_ret(BinaryCrossEntropy_Loss()(model, X, y, y_pred, num_samples))
-    
+        elif self.LossInUse == LOSS_FOCAL:
+            loss, stats = focal_loss(y_pred, y,
+                                     gamma=getattr(self, "focal_gamma", 2.0),
+                                     alpha=getattr(self, "focal_alpha", 1.0))
+            try:
+                if getattr(self, "use_wandb", False) and wandb.run is not None:
+                    wandb.log({f"FOCAL/{k}": v for k, v in stats.items()},
+                              step=getattr(self, "_current_epoch", 0))
+            except Exception:
+                pass
+            return _rt_ret(loss)
+        elif self.LossInUse == LOSS_CLUE_LITE:
+            loss, stats = clue_lite_loss(y_pred, y,
+                                         clue_lambda=getattr(self, "clue_lambda", 0.2),
+                                         detach_proxy=getattr(self, "clue_detach_proxy", True))
+            try:
+                if getattr(self, "use_wandb", False) and wandb.run is not None:
+                    wandb.log({f"CLUE/{k}": v for k, v in stats.items()},
+                              step=getattr(self, "_current_epoch", 0))
+            except Exception:
+                pass
+            return _rt_ret(loss)
+
         # if arrives here, it means that the loss function is the cross entropy loss
         return _rt_ret(CrossEntropy_Loss()(model, X, y, y_pred, num_samples))
+
+    # ------------------------------------------------------------------
+    #  Robust training epoch (PGD-AT / TRADES / MART)
+    # ------------------------------------------------------------------
+
+    _DATASET_NORM = {
+        "cifar10":       ((0.4914, 0.4822, 0.4465), (0.2471, 0.2435, 0.2616)),
+        "binaryCifar10": ((0.4914, 0.4822, 0.4465), (0.2471, 0.2435, 0.2616)),
+        "cifar100":      ((0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761)),
+        "svhn":          ((0.0, 0.0, 0.0), (1.0, 1.0, 1.0)),
+        "imageNet":      ((0.4810, 0.4574, 0.4078), (0.2146, 0.2104, 0.2138)),
+    }
+
+    class _NormWrap(nn.Module):
+        """Temporary wrapper: normalizes [0,1] pixel input before forward."""
+        def __init__(self, model, mean_t, std_t):
+            super().__init__()
+            self.model = model
+            self.mean_t = mean_t
+            self.std_t = std_t
+        def forward(self, x):
+            return self.model((x - self.mean_t) / self.std_t)
+
+    def epoch_robust(self, loader, model, opt, method="pgd_at"):
+        """One epoch of robust adversarial training."""
+        device = self.device
+        eps = getattr(self, "robust_eps", 8.0 / 255.0)
+        alpha = getattr(self, "robust_alpha", eps / 4.0)
+        steps = getattr(self, "robust_steps", 10)
+        beta = getattr(self, "robust_beta", 6.0)
+        rs = getattr(self, "robust_random_start", True)
+
+        mean, std = self._DATASET_NORM.get(self.dataset_name, ((0,0,0),(1,1,1)))
+        mean_t = torch.tensor(mean, dtype=torch.float32, device=device).view(1, -1, 1, 1)
+        std_t = torch.tensor(std, dtype=torch.float32, device=device).view(1, -1, 1, 1)
+        norm_wrap = self._NormWrap(model, mean_t, std_t)
+
+        model.train()
+        total_loss, total_err, total_adv_err, n = 0.0, 0.0, 0.0, 0
+
+        for X, y in loader:
+            X, y = X.to(device), y.to(device)
+            bs = X.shape[0]
+            X_pixel = X * std_t + mean_t
+
+            opt.zero_grad()
+
+            if method == "pgd_at":
+                model.eval()
+                x_adv_pix = pgd_attack_ce(norm_wrap, X_pixel, y, eps, alpha, steps, rs)
+                model.train()
+                x_adv_norm = (x_adv_pix - mean_t) / std_t
+                logits_adv = model(x_adv_norm)
+                loss = F.cross_entropy(logits_adv, y)
+            elif method == "trades":
+                loss, _ = trades_loss(norm_wrap, X_pixel, y, eps, alpha, steps, beta, rs)
+            elif method == "mart":
+                loss, _ = mart_loss(norm_wrap, X_pixel, y, eps, alpha, steps, beta, rs)
+            else:
+                raise ValueError(f"Unknown robust method: {method}")
+
+            loss.backward()
+            opt.step()
+
+            with torch.no_grad():
+                nat_pred = model(X).argmax(1)
+                total_err += (nat_pred != y).sum().item()
+            total_loss += loss.item() * bs
+            n += bs
+
+        return total_err / max(n, 1), total_loss / max(n, 1), []
 
     def epoch(self, loader, model, opt=None, num_samples=5, lagrangian=None):
         """Standard training/evaluation epoch over the dataset"""
@@ -5404,7 +5547,8 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
          ecg_tail_ratio_target=3.0, ecg_tail_ratio_beta=0.9, ecg_active_frac_floor=0.05,
          ecg_sparse_lam_decay=0.5, ecg_sparse_lam_zero=False,
          ecg_tail_lam_ema=0.9, ecg_tail_invalid_decay=0.95,
-         ecg_gate_temp=1.5):
+         ecg_gate_temp=1.5,
+         args=None):
     if seed is not None:
         os.environ["TRAIN_DATALOADER_SEED"] = str(seed)  # for DataLoader worker_init_fn (ImageNet etc.)
 
@@ -5547,7 +5691,28 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
     model_cnn.imbalance = str(imbalance)
     model_cnn.imb_factor = float(imb_factor) if imb_factor is not None else None
 
-    #trainTime, train_err, train_loss = model_cnn.run(modelName, iterations=int(stage1_epochs), stop=stop)
+    # ---- Robust training + focal/clue params ----
+    model_cnn.train_mode = str(getattr(args, "train_mode", "standard"))
+    model_cnn.focal_gamma = float(getattr(args, "focal_gamma", 2.0))
+    model_cnn.focal_alpha = float(getattr(args, "focal_alpha", 1.0))
+    model_cnn.clue_lambda = float(getattr(args, "clue_lambda", 0.2))
+    model_cnn.clue_detach_proxy = bool(getattr(args, "clue_detach_proxy", True))
+
+    _r_eps = float(getattr(args, "robust_eps", 8.0))
+    _r_alpha = float(getattr(args, "robust_alpha", 0.0))
+    _r_pixel = bool(getattr(args, "robust_pixel", True))
+    if _r_pixel:
+        _r_eps = _r_eps / 255.0
+        _r_alpha = (_r_alpha / 255.0) if _r_alpha > 0 else 0.0
+    _r_steps = int(getattr(args, "robust_steps", 10))
+    if _r_alpha <= 0:
+        _r_alpha = _r_eps / 4.0 if _r_steps <= 10 else (2.0 * _r_eps / _r_steps)
+    model_cnn.robust_eps = _r_eps
+    model_cnn.robust_alpha = _r_alpha
+    model_cnn.robust_steps = _r_steps
+    model_cnn.robust_beta = float(getattr(args, "robust_beta", 6.0))
+    model_cnn.robust_random_start = bool(getattr(args, "robust_random_start", True))
+
     model_cnn.run(runName, iterations=int(stage1_epochs), stop=stop, ckptName=ckptName, runName=runName)
     return
 
@@ -5636,8 +5801,26 @@ if __name__ == '__main__':
         "--loss_stage2",
         type=str,
         default="ce",
-        choices=["ce", "euat", "ecg", "ecg_abl"],
+        choices=["ce", "euat", "ecg", "ecg_abl", "focal", "clue_lite"],
     )
+
+    # ---- Robust training mode (pgd_at / trades / mart) ----
+    parser.add_argument("--train_mode", type=str, default="standard",
+                        choices=["standard", "pgd_at", "trades", "mart"])
+    parser.add_argument("--focal_gamma", type=float, default=2.0)
+    parser.add_argument("--focal_alpha", type=float, default=1.0)
+    parser.add_argument("--clue_lambda", type=float, default=0.2)
+    parser.add_argument("--clue_detach_proxy", type=str2bool, default=True)
+    parser.add_argument("--robust_eps", type=float, default=8.0,
+                        help="Adversarial eps for robust training (pixel units if robust_pixel)")
+    parser.add_argument("--robust_alpha", type=float, default=0.0,
+                        help="PGD step size (0=auto)")
+    parser.add_argument("--robust_steps", type=int, default=10)
+    parser.add_argument("--robust_beta", type=float, default=6.0,
+                        help="Regularization weight for TRADES/MART")
+    parser.add_argument("--robust_random_start", type=str2bool, default=True)
+    parser.add_argument("--robust_pixel", type=str2bool, default=True,
+                        help="If True, robust_eps/alpha are in pixel [0,255] scale")
 
     # ---- ECG params ----
     parser.add_argument("--ecg_lam", type=float, default=1.0)
@@ -5742,6 +5925,14 @@ if __name__ == '__main__':
         elif args.loss_stage2 in ("ecg", "ecg_abl"):
             LOSS_2nd_stage_wrong = LOSS_ECG
             LOSS_2nd_stage_correct = LOSS_ECG
+            option_stage2 = "batch_mix2"
+        elif args.loss_stage2 == "focal":
+            LOSS_2nd_stage_wrong = LOSS_FOCAL
+            LOSS_2nd_stage_correct = LOSS_FOCAL
+            option_stage2 = "batch_mix2"
+        elif args.loss_stage2 == "clue_lite":
+            LOSS_2nd_stage_wrong = LOSS_CLUE_LITE
+            LOSS_2nd_stage_correct = LOSS_CLUE_LITE
             option_stage2 = "batch_mix2"
         else:
             raise ValueError(f"Unknown --loss_stage2: {args.loss_stage2}")
@@ -6041,4 +6232,5 @@ if __name__ == "__main__":
         getattr(args, "ecg_sparse_lam_zero", False),
         getattr(args, "ecg_tail_lam_ema", 0.9), getattr(args, "ecg_tail_invalid_decay", 0.95),
         getattr(args, "ecg_gate_temp", 1.5),
+        args=args,
     )

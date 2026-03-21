@@ -270,6 +270,25 @@ def main() -> None:
         base = _safe_token(tsv_wandb_name)[: 200 - len(job_task_suffix)]
         run_name = base + job_task_suffix
     else:
+        _tm = (hp.get("train_mode") or "").strip()
+        _tm_tag = ""
+        if _tm and _tm != "standard":
+            _tm_tag = f"_tm-{_tm}"
+            _r_eps = (hp.get("robust_eps") or "").strip()
+            _r_st = (hp.get("robust_steps") or "").strip()
+            _r_beta = (hp.get("robust_beta") or "").strip()
+            if _r_eps:
+                _tm_tag += f"_eps{_r_eps}"
+            if _r_st:
+                _tm_tag += f"_st{_r_st}"
+            if _r_beta and _tm in ("trades", "mart"):
+                _tm_tag += f"_b{_r_beta}"
+        elif loss2 == "focal":
+            _fg = (hp.get("focal_gamma") or "").strip()
+            _tm_tag = f"_focal" + (f"_g{_fg}" if _fg else "")
+        elif loss2 == "clue_lite":
+            _cl = (hp.get("clue_lambda") or "").strip()
+            _tm_tag = f"_clue" + (f"_l{_cl}" if _cl else "")
         raw = (
             f"{dataset}"
             f"_s1-{e1}-{loss1}"
@@ -280,6 +299,7 @@ def main() -> None:
             f"_lam{lam_part}"
             f"_tau{tau_part}"
             f"_k{k_part}"
+            f"{_tm_tag}"
             f"{job_task_suffix}"
         )
         run_name = _safe_token(raw)[:200]
@@ -441,6 +461,19 @@ def main() -> None:
     _add_arg(cmd, "--stage2_find_every", hp, "stage2_find_every")
     _add_arg(cmd, "--stage2_ce_log_every", hp, "stage2_ce_log_every")
     _add_arg(cmd, "--stage2_lr_scale", hp, "stage2_lr_scale")
+
+    # ---- baseline comparison: focal / clue_lite / robust training ----
+    _add_arg(cmd, "--train_mode", hp, "train_mode")
+    _add_arg(cmd, "--focal_gamma", hp, "focal_gamma")
+    _add_arg(cmd, "--focal_alpha", hp, "focal_alpha")
+    _add_arg(cmd, "--clue_lambda", hp, "clue_lambda")
+    _add_arg(cmd, "--clue_detach_proxy", hp, "clue_detach_proxy")
+    _add_arg(cmd, "--robust_eps", hp, "robust_eps")
+    _add_arg(cmd, "--robust_alpha", hp, "robust_alpha")
+    _add_arg(cmd, "--robust_steps", hp, "robust_steps")
+    _add_arg(cmd, "--robust_beta", hp, "robust_beta")
+    _add_arg(cmd, "--robust_random_start", hp, "robust_random_start")
+    _add_arg(cmd, "--robust_pixel", hp, "robust_pixel")
 
     # record
     (run_dir / "cmd.txt").write_text(" ".join(cmd) + "\n", encoding="utf-8")
