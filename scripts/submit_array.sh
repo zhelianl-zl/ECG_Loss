@@ -2,7 +2,11 @@
 set -euo pipefail
 
 CONF_PATH="${1:-sweeps/cifar100.tsv}"
-MAX_PARALLEL="${2:-8}"
+# Second arg: concurrent array cap for Slurm --array=START-END%CAP.
+#   0 | all | max | unlimited  -> no % cap (schedule all tasks; cluster/QOS still limits actual slots)
+#   <positive int>             -> at most CAP tasks running at once
+# Omitted defaults to 0 (no artificial throttle).
+MAX_PARALLEL="${2:-0}"
 
 # Optional positional overrides:
 #   $3: GPU model or full GRES (e.g., "h100-80" or "gpu:h100-80:1")
@@ -85,6 +89,19 @@ if [[ "$N" -le 0 ]]; then
   exit 2
 fi
 
+ARRAY_RANGE="0-$((N-1))"
+mpl="$(printf '%s' "$MAX_PARALLEL" | tr '[:upper:]' '[:lower:]')"
+if [[ "$MAX_PARALLEL" == "0" || "$mpl" == "all" || "$mpl" == "max" || "$mpl" == "unlimited" ]]; then
+  ARRAY_SPEC="$ARRAY_RANGE"
+  MP_DISPLAY="unlimited (no % throttle)"
+elif [[ "$MAX_PARALLEL" =~ ^[1-9][0-9]*$ ]]; then
+  ARRAY_SPEC="${ARRAY_RANGE}%${MAX_PARALLEL}"
+  MP_DISPLAY="$MAX_PARALLEL"
+else
+  echo "ERROR: second arg must be 0|all|max|unlimited for no throttle, or a positive integer" >&2
+  exit 2
+fi
+
 # Choose workspace root (prefer Ocean)
 OCEAN_USER_DIR="/ocean/projects/${ACCOUNT}/${USER}"
 if [[ -d "/ocean/projects/${ACCOUNT}" ]]; then
@@ -116,7 +133,7 @@ export WANDB_JOB_TYPE_DEFAULT="${WANDB_JOB_TYPE_DEFAULT:-official}"
 
 echo "BASE=$BASE"
 echo "CONF=$CONF"
-echo "Tasks=$N  MaxParallel=$MAX_PARALLEL"
+echo "Tasks=$N  Array=$ARRAY_SPEC  MaxParallel=$MP_DISPLAY"
 echo "ACCOUNT=$ACCOUNT PARTITION=$PARTITION QOS=${QOS:-<none>} GRES=$GRES TIME=$TIME"
 echo "DATA_DIR=$DATA_DIR"
 echo "RUNS_DIR=$RUNS_DIR"
@@ -131,5 +148,5 @@ sbatch \
   --gres="$GRES" \
   -t "$TIME" \
   --export=ALL \
-  --array="0-$((N-1))%${MAX_PARALLEL}" \
+  --array="$ARRAY_SPEC" \
   "$SBATCH_SCRIPT"
