@@ -2401,6 +2401,7 @@ class trainModel():
             while epoch_counter < max_stage2_epochs+1:
 
                 global_epoch = epoch_counter + iterations
+                self._current_epoch = int(global_epoch)
 
                 if counter_dataSize == 0 and counter_repeat == 0:
 
@@ -2431,7 +2432,9 @@ class trainModel():
 
                 # update loss fucntion and train with correct predicitons
                 if self.printTimes: t1_init = time.time()
+                self._rt_train_begin()
                 self.epoch_interleave_batches(_train_loader_wrong,_train_loader_correct,  model, opt, num_samples=num_samples, weight_loss=alpha) # train
+                self._rt_train_end()
                 if self.printTimes: print('time train ' + str( time.time() - t1_init )) 
                 counter_dataSize += len(misclassified_ids)+len(correctclassified_ids)
 
@@ -2443,7 +2446,9 @@ class trainModel():
                 if counter_dataSize > epoch_dataSize:
                     if self.printTimes: t1_init = time.time()
 
+                    self._rt_eval_begin()
                     test_err, _, test_entropy, test_MI, _, _, _, _ = self.testModel_logs(dataset, runName, epoch_counter+iterations, 'standard', 0 ,0, 0, 0, 0, time.time() - t1, write_pred_logs, num_samples=num_samples)
+                    self._rt_eval_end()
                     test_unc = test_entropy if UNCERTAINTY_MEASURE == 'PE' else test_MI
 
                     last_global_epoch = iterations + max_stage2_epochs   # e.g. 30 + 30 = 60
@@ -3816,6 +3821,12 @@ class trainModel():
 
             X_wrong,y_wrong = X_wrong.to(self.device), y_wrong.to(self.device) # len of bacth size
             X_correct,y_correct = X_correct.to(self.device), y_correct.to(self.device) # len of bacth size
+            _bs = X_wrong.shape[0] + X_correct.shape[0]
+            if opt:
+                self._rt_add_epoch_imgs(_bs)
+                _step_tok = self._rt_step_timer_start(_bs)
+            else:
+                _step_tok = None
 
             if self.half_prec: 
                 # Runs the forward pass with autocasting.
@@ -3844,6 +3855,7 @@ class trainModel():
                     self.scaler.scale(loss).backward() # Scales the loss, and calls backward() . to create scaled gradients
                     self.scaler.step(opt) # Unscales gradients and calls or skips optimizer.step()
                     self.scaler.update()  # Updates the scale for next iteration
+                    self._rt_step_timer_end(_step_tok)
 
                     if dynamic_weights: weight_optimizer.step()
 
@@ -3895,6 +3907,7 @@ class trainModel():
 
                     loss.backward()
                     opt.step()
+                    self._rt_step_timer_end(_step_tok)
                     if dynamic_weights: weight_optimizer.step()
                         
         return #total_err /datasetSize, total_loss/datasetSize, misclassified_ids
@@ -4536,35 +4549,34 @@ class trainModel():
         self.model.train() # go back to train mode
 
         # step = epoch (1, 2, ...); include "epoch" so Wandb can use it as x-axis
-        wandb.log({
-            "epoch": int(iteration),
-            # STD
-            "STD/Error": test_err,
-            "STD/Entropy": test_entropy,
-            "STD/MI": test_MI,
-            "STD/uA": test_extra["uA"],
-            "STD/uAUC": test_extra["uAUC"],
-            "STD/Corr": test_extra["Corr"],
-            "STD/Wasserstein": test_extra["Wasserstein"],
-            "STD/ECE": test_extra["ECE"],
-            "STD/u_thr": test_extra["u_thr"],
-
-            "STD/AUROC_err_conf": test_extra.get("AUROC_err_conf", float("nan")),
-            "STD/AUROC_err_unc":  test_extra.get("AUROC_err_unc", float("nan")),
-
-            # PGD
-            "PGD/Error": adv_err,
-            "PGD/Entropy": adv_entropy,
-            "PGD/MI": adv_MI,
-            "PGD/uA": adv_extra["uA"],
-            "PGD/uAUC": adv_extra["uAUC"],
-            "PGD/Corr": adv_extra["Corr"],
-            "PGD/Wasserstein": adv_extra["Wasserstein"],
-            "PGD/ECE": adv_extra["ECE"],
-
-            "PGD/AUROC_err_conf": adv_extra.get("AUROC_err_conf", float("nan")),
-            "PGD/AUROC_err_unc":  adv_extra.get("AUROC_err_unc", float("nan")),
-        }, step=int(iteration))
+        try:
+            if wandb.run is not None:
+                wandb.log({
+                    "epoch": int(iteration),
+                    "STD/Error": test_err,
+                    "STD/Entropy": test_entropy,
+                    "STD/MI": test_MI,
+                    "STD/uA": test_extra["uA"],
+                    "STD/uAUC": test_extra["uAUC"],
+                    "STD/Corr": test_extra["Corr"],
+                    "STD/Wasserstein": test_extra["Wasserstein"],
+                    "STD/ECE": test_extra["ECE"],
+                    "STD/u_thr": test_extra["u_thr"],
+                    "STD/AUROC_err_conf": test_extra.get("AUROC_err_conf", float("nan")),
+                    "STD/AUROC_err_unc":  test_extra.get("AUROC_err_unc", float("nan")),
+                    "PGD/Error": adv_err,
+                    "PGD/Entropy": adv_entropy,
+                    "PGD/MI": adv_MI,
+                    "PGD/uA": adv_extra["uA"],
+                    "PGD/uAUC": adv_extra["uAUC"],
+                    "PGD/Corr": adv_extra["Corr"],
+                    "PGD/Wasserstein": adv_extra["Wasserstein"],
+                    "PGD/ECE": adv_extra["ECE"],
+                    "PGD/AUROC_err_conf": adv_extra.get("AUROC_err_conf", float("nan")),
+                    "PGD/AUROC_err_unc":  adv_extra.get("AUROC_err_unc", float("nan")),
+                }, step=int(iteration))
+        except Exception:
+            pass
 
         return test_err, test_loss, test_entropy, test_MI, adv_err, adv_loss, adv_entropy, adv_MI
 
