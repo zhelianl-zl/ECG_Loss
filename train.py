@@ -2319,21 +2319,20 @@ class trainModel():
                 self._rt_train_end()
 
                 self._rt_eval_begin()
-                test_err, test_loss, test_entropy, test_MI, test_extra = self.test_epoch(
-                    loader.test_loader, model, num_samples=5, return_details=True)
+                test_err, _, _, _, _, _, _, _ = self.testModel_logs(
+                    dataset, modelName, global_epoch, 'standard', 0, 0, 0, 0, 0,
+                    time.time() - t1, False, num_samples=5)
                 self._rt_eval_end()
                 self._ecg_on_epoch_end(global_epoch, metric=test_err)
 
                 try:
                     if wandb.run is not None:
-                        log_dict = {
+                        wandb.log({
                             "train/loss": rob_loss, "train/err": rob_err,
-                            "STD/Error": test_err, "STD/Loss": test_loss,
                             "robust/eps": getattr(self, "robust_eps", 0),
                             "robust/method": _train_mode,
                             "epoch": global_epoch, "stage": 2,
-                        }
-                        wandb.log(log_dict, step=global_epoch)
+                        }, step=global_epoch)
                 except Exception:
                     pass
 
