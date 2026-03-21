@@ -2123,7 +2123,10 @@ class trainModel():
         print("Standard training")
 
         if _model is None: 
-            it=0
+            it = 0
+            counter = 0
+            train_err = 0.0
+            train_loss = 0.0
             t1 = time.time()
 
         for counter in range(it+1, iterations+1):
@@ -2608,6 +2611,7 @@ class trainModel():
         momentum = opt.param_groups[0]["momentum"]
 
         # load final models
+        _model = None
         for it in range(iterations, 0, -1):
             model_name = modelName + "_epoch" + str(it) #str(iterations)
             _model, _opt, trainTime, train_err, train_loss, counter = self.LoadModel(model, opt, model_name)
@@ -2640,6 +2644,8 @@ class trainModel():
         if _model is None: 
             t1 = time.time()
             counter = 1
+            train_err = 0.0
+            train_loss = 0.0
 
         ST_it = int(iterations*(1-ratio))
         AT_it = int(iterations*ratio)
@@ -2817,6 +2823,7 @@ class trainModel():
         momentum = opt.param_groups[0]["momentum"]
 
         # load final models
+        _model = None
         for it in range(iterations, 0, -1):
             model_name = modelName + "_epoch" + str(it) #+ str(iterations)
             _model, _opt, trainTime, train_err, train_loss, counter = self.LoadModel(model, opt, model_name)
@@ -2849,6 +2856,8 @@ class trainModel():
         if _model is None: 
             t1 = time.time()
             counter = 1
+            train_err = 0.0
+            train_loss = 0.0
 
         ST_it = int(iterations*(1-ratio))
         AT_it = int(iterations*ratio)

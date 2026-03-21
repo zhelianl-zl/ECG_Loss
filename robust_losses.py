@@ -93,7 +93,7 @@ def trades_loss(model, x, y, epsilon, alpha, steps, beta=6.0, random_start=True)
 
 def mart_loss(model, x, y, epsilon, alpha, steps, beta=6.0, random_start=True):
     """MART (Wang et al. 2020): misclassification-aware robust training."""
-    x_adv = pgd_attack_ce(model, x, y, epsilon, alpha, steps, random_start=True)
+    x_adv = pgd_attack_ce(model, x, y, epsilon, alpha, steps, random_start=random_start)
     logits = model(x)
     logits_adv = model(x_adv)
     adv_probs = F.softmax(logits_adv, dim=1)
