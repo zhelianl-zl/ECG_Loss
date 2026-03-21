@@ -6,6 +6,10 @@ binaryCifar10	37988109	0	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval-binary	
 binaryCifar10	37988109	0	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval-binary	Eval	eval_binary_CE_150ep_from37988109_0_eps2				
 binaryCifar10	38017823	1	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval-binary	Eval	eval_binary_ECGS_autocap_q76_k20_150ep_from38017823_1				
 binaryCifar10	38017823	1	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval-binary	Eval	eval_binary_ECGS_autocap_q76_k20_150ep_from38017823_1_eps2				
+binaryCifar10	38003293	1	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval-binary	Eval	eval_binary_ECGS_sustain_q80_k20_40ecg+110ce_from38003293_1				
+binaryCifar10	38003293	1	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval-binary	Eval	eval_binary_ECGS_sustain_q80_k20_40ecg+110ce_from38003293_1_eps2				
+binaryCifar10	38003293	2	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval-binary	Eval	eval_binary_ECGS_sustain_q60_k20_40ecg+110ce_from38003293_2				
+binaryCifar10	38003293	2	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval-binary	Eval	eval_binary_ECGS_sustain_q60_k20_40ecg+110ce_from38003293_2_eps2				
 cifar10	37990933	0	fgsm,pgd_linf,pgd_linf_rs	4	20	gaussian_noise,brightness	5	exp	ecgs-eval-cifar10	Eval	eval_cifar10_CE_60ep_from37990933_0				
 cifar10	37990933	0	fgsm,pgd_linf,pgd_linf_rs	2	20	gaussian_noise,brightness	5	exp	ecgs-eval-cifar10	Eval	eval_cifar10_CE_60ep_from37990933_0_eps2				
 cifar10	38012986	6	fgsm,pgd_linf,pgd_linf_rs	4	20	gaussian_noise,brightness	5	exp	ecgs-eval-cifar10	Eval	eval_cifar10_ECGS_autocap_q77_k20_60ep_from38012986_6				
