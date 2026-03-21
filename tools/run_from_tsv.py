@@ -475,6 +475,10 @@ def main() -> None:
     _add_arg(cmd, "--robust_random_start", hp, "robust_random_start")
     _add_arg(cmd, "--robust_pixel", hp, "robust_pixel")
 
+    # ---- runtime timing options ----
+    _add_arg(cmd, "--rt_step_sample_every", hp, "rt_step_sample_every")
+    _add_arg(cmd, "--rt_minimal_mode", hp, "rt_minimal_mode")
+
     # record
     (run_dir / "cmd.txt").write_text(" ".join(cmd) + "\n", encoding="utf-8")
     (run_dir / "wandb_meta.txt").write_text(

@@ -1431,20 +1431,32 @@ class trainModel():
     # Runtime diagnostics utilities
     # -------------------------------
     def _rt_reset_epoch_buffers(self):
-        # epoch wall-clock (includes train + eval inside this epoch scope)
         self._rt_epoch_wall_start = None
         self._rt_epoch_wall_s = 0.0
 
-        # sampled loss-call timing buffers (training only; CUDA uses events -> sync once per epoch)
+        self._rt_epoch_imgs = 0
+        self._rt_train_wall_start = None
+        self._rt_train_wall_s = 0.0
+        self._rt_eval_wall_start = None
+        self._rt_eval_wall_s = 0.0
+
         self._rt_loss_call_idx = 0
         self._rt_loss_cpu_ms_sum = 0.0
         self._rt_loss_cpu_n = 0
         self._rt_loss_cpu_imgs = 0
-
-        self._rt_loss_cuda_pairs = []  # list[(ev_start, ev_end, batch_size)]
+        self._rt_loss_cuda_pairs = []
         self._rt_loss_cuda_ms_sum = 0.0
         self._rt_loss_cuda_n = 0
         self._rt_loss_cuda_imgs = 0
+
+        self._rt_step_call_idx = 0
+        self._rt_step_cpu_ms_sum = 0.0
+        self._rt_step_cpu_n = 0
+        self._rt_step_cpu_imgs = 0
+        self._rt_step_cuda_pairs = []
+        self._rt_step_cuda_ms_sum = 0.0
+        self._rt_step_cuda_n = 0
+        self._rt_step_cuda_imgs = 0
 
     def _rt_on_epoch_begin(self, global_epoch: int):
         # enable only when W&B is active and user didn't disable
@@ -1515,26 +1527,68 @@ class trainModel():
             loss_n = self._rt_loss_cpu_n
             backend = "cpu_timer"
 
+        # finalize step timings (sync ONCE)
+        if self._rt_step_cuda_pairs:
+            try:
+                torch.cuda.synchronize()
+            except Exception:
+                pass
+            sms, sn, simgs = 0.0, 0, 0
+            for ev0, ev1, bs in self._rt_step_cuda_pairs:
+                try:
+                    sms += float(ev0.elapsed_time(ev1))
+                    sn += 1
+                    simgs += int(bs)
+                except Exception:
+                    continue
+            self._rt_step_cuda_ms_sum = sms
+            self._rt_step_cuda_n = sn
+            self._rt_step_cuda_imgs = simgs
+
+        if use_cuda and self._rt_step_cuda_n > 0:
+            step_ms_avg = self._rt_step_cuda_ms_sum / float(self._rt_step_cuda_n)
+            step_imgs = self._rt_step_cuda_imgs
+            step_n = self._rt_step_cuda_n
+            step_backend = "cuda_event"
+        else:
+            step_ms_avg = self._rt_step_cpu_ms_sum / float(self._rt_step_cpu_n) if self._rt_step_cpu_n > 0 else float("nan")
+            step_imgs = self._rt_step_cpu_imgs
+            step_n = self._rt_step_cpu_n
+            step_backend = "cpu_timer"
+
         # derived
         epoch_wall_s = float(self._rt_epoch_wall_s) if self._rt_epoch_wall_s else float("nan")
-        imgs_per_s = (float(loss_imgs) / epoch_wall_s) if (epoch_wall_s and epoch_wall_s > 0 and loss_imgs > 0) else float("nan")
+        epoch_imgs = int(getattr(self, "_rt_epoch_imgs", 0))
+        train_wall_s = float(getattr(self, "_rt_train_wall_s", 0.0))
+        eval_wall_s = float(getattr(self, "_rt_eval_wall_s", 0.0))
+        epoch_img_per_s = (float(epoch_imgs) / train_wall_s) if (train_wall_s > 0 and epoch_imgs > 0) else float("nan")
 
         # log
         try:
             if wandb.run is not None:
-                wandb.log(
-                    {
-                        "epoch": int(global_epoch),
-                        "TIME/epoch_wall_s": epoch_wall_s,
+                rt_minimal = bool(getattr(self, "rt_minimal_mode", False))
+                log_d = {
+                    "epoch": int(global_epoch),
+                    "TIME/epoch_wall_s": epoch_wall_s,
+                    "TIME/train_wall_s": train_wall_s,
+                    "TIME/eval_wall_s": eval_wall_s,
+                    "TIME/epoch_imgs": epoch_imgs,
+                    "TIME/epoch_img_per_s": epoch_img_per_s,
+                    "TIME/train_step_ms": float(step_ms_avg),
+                    "TIME/train_step_n": int(step_n),
+                    "TIME/train_step_imgs": int(step_imgs),
+                    "TIME/train_step_backend": str(step_backend),
+                    "TIME/train_step_sample_every": int(getattr(self, "rt_step_sample_every", 10)),
+                }
+                if not rt_minimal:
+                    log_d.update({
                         "TIME/loss_call_ms": float(loss_ms_avg),
                         "TIME/loss_call_n": int(loss_n),
                         "TIME/loss_call_imgs": int(loss_imgs),
-                        "TIME/img_per_s_est": float(imgs_per_s),
                         "TIME/backend": str(backend),
                         "TIME/rt_sample_every": int(getattr(self, "rt_sample_every", 0)),
-                    },
-                    step=int(global_epoch),
-                )
+                    })
+                wandb.log(log_d, step=int(global_epoch))
         except Exception:
             pass
 
@@ -1588,6 +1642,67 @@ class trainModel():
             self._rt_loss_cpu_ms_sum += (t1 - t0) * 1000.0
             self._rt_loss_cpu_n += 1
             self._rt_loss_cpu_imgs += int(bs)
+
+    def _rt_add_epoch_imgs(self, n):
+        self._rt_epoch_imgs = getattr(self, "_rt_epoch_imgs", 0) + int(n)
+
+    def _rt_train_begin(self):
+        if getattr(self, "_rt_enabled", False):
+            self._rt_train_wall_start = time.perf_counter()
+
+    def _rt_train_end(self):
+        if getattr(self, "_rt_enabled", False) and getattr(self, "_rt_train_wall_start", None) is not None:
+            self._rt_train_wall_s = getattr(self, "_rt_train_wall_s", 0.0) + (time.perf_counter() - self._rt_train_wall_start)
+            self._rt_train_wall_start = None
+
+    def _rt_eval_begin(self):
+        if getattr(self, "_rt_enabled", False):
+            self._rt_eval_wall_start = time.perf_counter()
+
+    def _rt_eval_end(self):
+        if getattr(self, "_rt_enabled", False) and getattr(self, "_rt_eval_wall_start", None) is not None:
+            self._rt_eval_wall_s = getattr(self, "_rt_eval_wall_s", 0.0) + (time.perf_counter() - self._rt_eval_wall_start)
+            self._rt_eval_wall_start = None
+
+    def _rt_step_timer_start(self, batch_size):
+        if not getattr(self, "_rt_enabled", False) or not getattr(self, "_rt_epoch_active", False):
+            return None
+        self._rt_step_call_idx += 1
+        every = int(getattr(self, "rt_step_sample_every", 10) or 10)
+        if every > 1 and (self._rt_step_call_idx % every != 0):
+            return None
+        use_cuda = False
+        try:
+            use_cuda = (self.device is not None) and (getattr(self.device, "type", "") == "cuda") and torch.cuda.is_available()
+        except Exception:
+            pass
+        if use_cuda:
+            try:
+                ev0 = torch.cuda.Event(enable_timing=True)
+                ev0.record()
+                return ("cuda", ev0, int(batch_size))
+            except Exception:
+                pass
+        return ("cpu", float(time.perf_counter()), int(batch_size))
+
+    def _rt_step_timer_end(self, token):
+        if token is None:
+            return
+        kind = token[0]
+        if kind == "cuda":
+            ev0, bs = token[1], token[2]
+            try:
+                ev1 = torch.cuda.Event(enable_timing=True)
+                ev1.record()
+                self._rt_step_cuda_pairs.append((ev0, ev1, int(bs)))
+            except Exception:
+                return
+        else:
+            t0, bs = float(token[1]), int(token[2])
+            self._rt_step_cpu_ms_sum += (time.perf_counter() - t0) * 1000.0
+            self._rt_step_cpu_n += 1
+            self._rt_step_cpu_imgs += int(bs)
+
     def _ecg_on_epoch_begin(self, global_epoch: int):
         """Apply ECG scheduling before the epoch starts."""
 
@@ -2134,10 +2249,15 @@ class trainModel():
             print("epoch number " + str(counter))
 
             self._ecg_on_epoch_begin(counter)
-            self._current_epoch = int(counter)  # for ImageNet periodic wandb step during epoch
+            self._current_epoch = int(counter)
 
+            self._rt_train_begin()
             train_err, train_loss, misclassified_ids = self.epoch(loader.train_loader, model, opt, num_samples=num_samples, lagrangian=lagrangian)
+            self._rt_train_end()
+
+            self._rt_eval_begin()
             test_err, _, _, _, _, _, _, _ = self.testModel_logs(dataset, modelName, counter, 'standard', 0 ,0, 0, 0, 0, time.time() - t1, write_pred_logs, num_samples=num_samples)
+            self._rt_eval_end()
             self._ecg_on_epoch_end(counter, metric=test_err)
 
             # ===== W&B: one point per epoch, step = epoch (1, 2, ..., 60) =====
@@ -2193,11 +2313,15 @@ class trainModel():
                 self._ecg_on_epoch_begin(global_epoch)
                 print(f"epoch number {global_epoch} (robust {_train_mode})")
 
+                self._rt_train_begin()
                 rob_err, rob_loss, _ = self.epoch_robust(
                     loader.train_loader, model, opt, method=_train_mode)
+                self._rt_train_end()
 
+                self._rt_eval_begin()
                 test_err, test_loss, test_entropy, test_MI, test_extra = self.test_epoch(
                     loader.test_loader, model, num_samples=5, return_details=True)
+                self._rt_eval_end()
                 self._ecg_on_epoch_end(global_epoch, metric=test_err)
 
                 try:
@@ -3523,8 +3647,10 @@ class trainModel():
         for X, y in loader:
             X, y = X.to(device), y.to(device)
             bs = X.shape[0]
-            X_pixel = X * std_t + mean_t
+            self._rt_add_epoch_imgs(bs)
+            _step_tok = self._rt_step_timer_start(bs)
 
+            X_pixel = X * std_t + mean_t
             opt.zero_grad()
 
             if method == "pgd_at":
@@ -3543,6 +3669,7 @@ class trainModel():
 
             loss.backward()
             opt.step()
+            self._rt_step_timer_end(_step_tok)
 
             with torch.no_grad():
                 nat_pred = model(X).argmax(1)
@@ -3577,6 +3704,11 @@ class trainModel():
             _fetch_s = time.time() - _t_batch_start
             _t_step0 = time.time()
             X,y = X.to(self.device, non_blocking=True), y.to(self.device, non_blocking=True) # len of bacth size
+            if opt:
+                self._rt_add_epoch_imgs(X.shape[0])
+                _step_tok = self._rt_step_timer_start(X.shape[0])
+            else:
+                _step_tok = None
             if self.half_prec: 
                 # Runs the forward pass with autocasting.
                 with torch.cuda.amp.autocast(dtype=torch.float16):
@@ -3597,9 +3729,9 @@ class trainModel():
                         
                     self.scaler.step(opt) # Unscales gradients and calls or skips optimizer.step()
                     self.scaler.update()  # Updates the scale for next iteration
+                    self._rt_step_timer_end(_step_tok)
 
             else:
-                #loss = nn.CrossEntropyLoss()(yp,y)
                 y_pred = model(X)
 
                 if opt:  # backpropagation
@@ -3613,6 +3745,7 @@ class trainModel():
                         loss.backward()
     
                     opt.step()
+                    self._rt_step_timer_end(_step_tok)
             
             misclassified = y_pred.max(dim=1)[1] != y
             # Calculate the IDs of misclassified inputs
@@ -5684,6 +5817,8 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
     # runtime diagnostics config
     model_cnn.log_runtime = bool(log_runtime)
     model_cnn.rt_sample_every = int(rt_sample_every)
+    model_cnn.rt_step_sample_every = int(getattr(args, "rt_step_sample_every", 10))
+    model_cnn.rt_minimal_mode = bool(getattr(args, "rt_minimal_mode", False))
 
     model_cnn.stage2_lr_scale = float(stage2_lr_scale)
     # stage2 speed: reduce full-train passes for large datasets (e.g. ImageNet32)
@@ -5891,6 +6026,10 @@ if __name__ == '__main__':
     parser.add_argument("--log_runtime", type=str2bool, default=True)
     parser.add_argument("--rt_sample_every", type=int, default=20,
                         help="Measure loss-call latency every N calls (CUDA uses events + 1 sync per epoch).")
+    parser.add_argument("--rt_step_sample_every", type=int, default=10,
+                        help="Measure full training step latency every N batches.")
+    parser.add_argument("--rt_minimal_mode", type=str2bool, default=False,
+                        help="If True, skip optional loss-call timing diagnostics (keeps step+wall timing).")
 
     # ---- eval / adv suite / C-suite / imbalance / dump (used by run_from_tsv sweeps) ----
     parser.add_argument("--eval_extra_every", type=int, default=0, help="Run extra eval every N epochs (0 = off).")
