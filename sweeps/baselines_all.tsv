@@ -18,6 +18,12 @@ cifar100	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	0	60	ce	ce	none	True	n
 cifar100	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	0	60	ce	ce	none	True	none							True	c100_trades_b6	baseline					ecg-cifar100-pmax1	baselines	c100_trades_b6	trades					4	1	10	6.0	True	True
 cifar100	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	0	60	ce	ce	none	True	none							True	c100_mart_b6	baseline					ecg-cifar100-pmax1	baselines	c100_mart_b6	mart					4	1	10	6.0	True	True
 cifar100	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	0	60	ce	euat	none	True	none							True	c100_euat	baseline					ecg-cifar100-pmax1	baselines	c100_euat	standard										
+cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	0	60	ce	focal	none	True	none							True	c100_lr01_focal_g2	baseline					ecg-cifar100-pmax	baselines	c100_lr01_focal_g2	standard	2.0	1.0								
+cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	0	60	ce	clue_lite	none	True	none							True	c100_lr01_clue_l02	baseline					ecg-cifar100-pmax	baselines	c100_lr01_clue_l02	standard			0.2	True						
+cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	0	60	ce	ce	none	True	none							True	c100_lr01_pgdat_eps4	baseline					ecg-cifar100-pmax	baselines	c100_lr01_pgdat_eps4	pgd_at					4	1	10		True	True
+cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	0	60	ce	ce	none	True	none							True	c100_lr01_trades_b6	baseline					ecg-cifar100-pmax	baselines	c100_lr01_trades_b6	trades					4	1	10	6.0	True	True
+cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	0	60	ce	ce	none	True	none							True	c100_lr01_mart_b6	baseline					ecg-cifar100-pmax	baselines	c100_lr01_mart_b6	mart					4	1	10	6.0	True	True
+cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	0	60	ce	euat	none	True	none							True	c100_lr01_euat	baseline					ecg-cifar100-pmax	baselines	c100_lr01_euat	standard										
 svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	0	60	ce	focal	none	True	none							True	svhn_focal_g2	baseline					ecg-svhn-pmax	baselines	svhn_focal_g2	standard	2.0	1.0								
 svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	0	60	ce	clue_lite	none	True	none							True	svhn_clue_l02	baseline					ecg-svhn-pmax	baselines	svhn_clue_l02	standard			0.2	True						
 svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	0	60	ce	ce	none	True	none							True	svhn_pgdat_eps4	baseline					ecg-svhn-pmax	baselines	svhn_pgdat_eps4	pgd_at					4	1	10		True	True
