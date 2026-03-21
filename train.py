@@ -3476,8 +3476,9 @@ class trainModel():
         "binaryCifar10": ((0.4914, 0.4822, 0.4465), (0.2471, 0.2435, 0.2616)),
         "cifar100":      ((0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761)),
         "svhn":          ((0.0, 0.0, 0.0), (1.0, 1.0, 1.0)),
-        "imageNet":      ((0.4810, 0.4574, 0.4078), (0.2146, 0.2104, 0.2138)),
     }
+    _IMAGENET_NORM_SMALL = ((0.4810, 0.4574, 0.4078), (0.2146, 0.2104, 0.2138))
+    _IMAGENET_NORM_224   = ((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
 
     class _NormWrap(nn.Module):
         """Temporary wrapper: normalizes [0,1] pixel input before forward."""
@@ -3498,7 +3499,11 @@ class trainModel():
         beta = getattr(self, "robust_beta", 6.0)
         rs = getattr(self, "robust_random_start", True)
 
-        mean, std = self._DATASET_NORM.get(self.dataset_name, ((0,0,0),(1,1,1)))
+        if self.dataset_name == "imageNet":
+            _img_orig = os.environ.get("IMAGENET_ORIGINAL", "0").lower() in ("1", "true")
+            mean, std = self._IMAGENET_NORM_224 if _img_orig else self._IMAGENET_NORM_SMALL
+        else:
+            mean, std = self._DATASET_NORM.get(self.dataset_name, ((0,0,0),(1,1,1)))
         mean_t = torch.tensor(mean, dtype=torch.float32, device=device).view(1, -1, 1, 1)
         std_t = torch.tensor(std, dtype=torch.float32, device=device).view(1, -1, 1, 1)
         norm_wrap = self._NormWrap(model, mean_t, std_t)
