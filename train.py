@@ -72,10 +72,11 @@ from ensemble_fusion import FusionClassifier, AdversarialTrainingClassifier
 from cals import AugLagrangian, AugLagrangianClass
 
 from ecg_loss import ecg_loss
-from robust_losses import focal_loss, clue_lite_loss, trades_loss, mart_loss, pgd_attack_ce
+from robust_losses import focal_loss, clue_lite_loss, trades_loss, mart_loss, pgd_attack_ce, clue_loss
 LOSS_ECG = "ecg"
 LOSS_FOCAL = "focal"
 LOSS_CLUE_LITE = "clue_lite"
+LOSS_CLUE = "clue"
 _AUTO_LAM_RULES = ("auto", "auto_w", "auto_d", "auto_dw", "auto_tr", "auto_tr_sustain", "auto_tr_autocap", "auto_tr_autocap_gate")
 
 # --- PE mode switches ---
@@ -3600,6 +3601,17 @@ class trainModel():
             except Exception:
                 pass
             return _rt_ret(loss)
+        elif self.LossInUse == LOSS_CLUE:
+            loss, stats = clue_loss(model, X, y,
+                                    alpha=getattr(self, "clue_alpha", 0.5),
+                                    mc_passes=getattr(self, "clue_mc_passes", 5))
+            try:
+                if getattr(self, "use_wandb", False) and wandb.run is not None:
+                    wandb.log({f"CLUE_MC/{k}": v for k, v in stats.items()},
+                              step=getattr(self, "_current_epoch", 0))
+            except Exception:
+                pass
+            return _rt_ret(loss)
 
         # if arrives here, it means that the loss function is the cross entropy loss
         return _rt_ret(CrossEntropy_Loss()(model, X, y, y_pred, num_samples))
@@ -5857,6 +5869,10 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
     model_cnn.focal_alpha = float(getattr(args, "focal_alpha", 1.0))
     model_cnn.clue_lambda = float(getattr(args, "clue_lambda", 0.2))
     model_cnn.clue_detach_proxy = bool(getattr(args, "clue_detach_proxy", True))
+    model_cnn.clue_alpha = float(getattr(args, "clue_alpha", 0.5))
+    model_cnn.clue_mc_passes = int(getattr(args, "clue_mc_passes", 5))
+    model_cnn.clue_dropout_p = float(getattr(args, "clue_dropout_p", 0.3))
+    model_cnn.clue_enable_mcdo = bool(getattr(args, "clue_enable_mcdo", True))
 
     _r_eps = float(getattr(args, "robust_eps", 8.0))
     _r_alpha = float(getattr(args, "robust_alpha", 0.0))
@@ -5961,8 +5977,15 @@ if __name__ == '__main__':
         "--loss_stage2",
         type=str,
         default="ce",
-        choices=["ce", "euat", "ecg", "ecg_abl", "focal", "clue_lite"],
+        choices=["ce", "euat", "ecg", "ecg_abl", "focal", "clue_lite", "clue"],
     )
+
+    # ---- CLUE params ----
+    parser.add_argument("--clue_dropout_p", type=float, default=0.3)
+    parser.add_argument("--clue_mc_passes", type=int, default=5)
+    parser.add_argument("--clue_alpha", type=float, default=0.5,
+                        help="CLUE: alpha * CE + (1-alpha) * (CE-u)^2")
+    parser.add_argument("--clue_enable_mcdo", type=str2bool, default=True)
 
     # ---- Robust training mode (pgd_at / trades / mart) ----
     parser.add_argument("--train_mode", type=str, default="standard",
@@ -6097,6 +6120,10 @@ if __name__ == '__main__':
         elif args.loss_stage2 == "clue_lite":
             LOSS_2nd_stage_wrong = LOSS_CLUE_LITE
             LOSS_2nd_stage_correct = LOSS_CLUE_LITE
+            option_stage2 = "batch_mix2"
+        elif args.loss_stage2 == "clue":
+            LOSS_2nd_stage_wrong = LOSS_CLUE
+            LOSS_2nd_stage_correct = LOSS_CLUE
             option_stage2 = "batch_mix2"
         else:
             raise ValueError(f"Unknown --loss_stage2: {args.loss_stage2}")

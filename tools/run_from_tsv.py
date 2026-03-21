@@ -288,7 +288,11 @@ def main() -> None:
             _tm_tag = f"_focal" + (f"_g{_fg}" if _fg else "")
         elif loss2 == "clue_lite":
             _cl = (hp.get("clue_lambda") or "").strip()
-            _tm_tag = f"_clue" + (f"_l{_cl}" if _cl else "")
+            _tm_tag = f"_cluelite" + (f"_l{_cl}" if _cl else "")
+        elif loss2 == "clue":
+            _ca = (hp.get("clue_alpha") or "").strip()
+            _cm = (hp.get("clue_mc_passes") or "").strip()
+            _tm_tag = f"_clue" + (f"_a{_ca}" if _ca else "") + (f"_mc{_cm}" if _cm else "")
         raw = (
             f"{dataset}"
             f"_s1-{e1}-{loss1}"
@@ -468,6 +472,10 @@ def main() -> None:
     _add_arg(cmd, "--focal_alpha", hp, "focal_alpha")
     _add_arg(cmd, "--clue_lambda", hp, "clue_lambda")
     _add_arg(cmd, "--clue_detach_proxy", hp, "clue_detach_proxy")
+    _add_arg(cmd, "--clue_dropout_p", hp, "clue_dropout_p")
+    _add_arg(cmd, "--clue_mc_passes", hp, "clue_mc_passes")
+    _add_arg(cmd, "--clue_alpha", hp, "clue_alpha")
+    _add_arg(cmd, "--clue_enable_mcdo", hp, "clue_enable_mcdo")
     _add_arg(cmd, "--robust_eps", hp, "robust_eps")
     _add_arg(cmd, "--robust_alpha", hp, "robust_alpha")
     _add_arg(cmd, "--robust_steps", hp, "robust_steps")

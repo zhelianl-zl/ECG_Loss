@@ -1,5 +1,7 @@
-"""Robust-training baselines: focal, CLUE-lite, PGD-AT, TRADES, MART."""
+"""Robust-training baselines: focal, CLUE-lite, CLUE, PGD-AT, TRADES, MART."""
+import math
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 
 
@@ -114,4 +116,62 @@ def mart_loss(model, x, y, epsilon, alpha, steps, beta=6.0, random_start=True):
         "mart_loss_robust": loss_robust.item(),
         "mart_true_prob_mean": true_probs.mean().item(),
         "mart_beta": beta,
+    }
+
+
+def _enable_dropout(model):
+    """Enable dropout layers for MC inference while keeping BN in eval mode."""
+    for m in model.modules():
+        if isinstance(m, (torch.nn.Dropout, torch.nn.Dropout2d)):
+            m.train()
+
+
+def mc_dropout_uncertainty(model, x, mc_passes=5, eps=1e-8):
+    """Estimate predictive entropy via MC dropout.
+
+    Keeps BN in eval mode, only enables dropout for stochastic passes.
+    Returns per-sample predictive entropy [B].
+    """
+    was_training = model.training
+    model.eval()
+    _enable_dropout(model)
+
+    probs_sum = None
+    with torch.no_grad():
+        for _ in range(mc_passes):
+            logits = model(x)
+            p = F.softmax(logits, dim=1)
+            if probs_sum is None:
+                probs_sum = p
+            else:
+                probs_sum = probs_sum + p
+    p_mean = probs_sum / mc_passes
+    ent = -(p_mean * (p_mean + eps).log()).sum(dim=1)
+
+    model.train(was_training)
+    return ent
+
+
+def clue_loss(model, x, y, alpha=0.5, mc_passes=5, eps=1e-8):
+    """Classification CLUE loss: alpha * L_e + (1-alpha) * (L_e - u)^2.
+
+    L_e = per-sample CE loss (with gradient)
+    u   = predictive entropy from MC dropout (detached, no gradient)
+    """
+    uncertainty = mc_dropout_uncertainty(model, x, mc_passes=mc_passes, eps=eps)
+    u = uncertainty.detach()
+
+    logits = model(x)
+    ce_i = F.cross_entropy(logits, y, reduction="none")
+
+    align = (ce_i - u).pow(2)
+    loss = (alpha * ce_i + (1.0 - alpha) * align).mean()
+
+    return loss, {
+        "clue_ce_mean": ce_i.mean().item(),
+        "clue_unc_mean": u.mean().item(),
+        "clue_unc_std": u.std().item(),
+        "clue_align_mean": align.mean().item(),
+        "clue_alpha": alpha,
+        "clue_mc_passes": mc_passes,
     }
