@@ -2093,7 +2093,7 @@ class trainModel():
         savePrevModel = False
         num_samples = 5
 
-        
+        _model = None
         for it in range(iterations, 0, -1):
             model_name = ckptName + "_epoch" + str(it)
             _model, _opt, trainTime, train_err, train_loss, counter = self.LoadModel(model, opt, model_name) # load model
