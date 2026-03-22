@@ -1,5 +1,5 @@
 import os, sys
-from typing import Dict
+from typing import Dict, Optional
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -1459,6 +1459,44 @@ class trainModel():
         self._rt_step_cuda_n = 0
         self._rt_step_cuda_imgs = 0
 
+    def _mem_reset_peak_for_epoch(self) -> None:
+        """Reset CUDA peak memory counters at epoch start (W&B diagnostics only)."""
+        if not torch.cuda.is_available():
+            return
+        dev = getattr(self, "device", None)
+        if dev is None or getattr(dev, "type", "") != "cuda":
+            return
+        try:
+            torch.cuda.reset_peak_memory_stats(dev)
+        except Exception:
+            pass
+
+    def _mem_cuda_mem_payload(self, synchronize: bool = True) -> Optional[dict]:
+        """Current-epoch CUDA memory snapshot for W&B (MB); None if not applicable."""
+        if not torch.cuda.is_available():
+            return None
+        dev = getattr(self, "device", None)
+        if dev is None or getattr(dev, "type", "") != "cuda":
+            return None
+        if synchronize:
+            try:
+                torch.cuda.synchronize(dev)
+            except Exception:
+                try:
+                    torch.cuda.synchronize()
+                except Exception:
+                    pass
+        try:
+            inv_mb = 1.0 / (1024.0 ** 2)
+            return {
+                "MEM/peak_allocated_mb": float(torch.cuda.max_memory_allocated(dev) * inv_mb),
+                "MEM/peak_reserved_mb": float(torch.cuda.max_memory_reserved(dev) * inv_mb),
+                "MEM/end_allocated_mb": float(torch.cuda.memory_allocated(dev) * inv_mb),
+                "MEM/end_reserved_mb": float(torch.cuda.memory_reserved(dev) * inv_mb),
+            }
+        except Exception:
+            return None
+
     def _rt_on_epoch_begin(self, global_epoch: int):
         # enable only when W&B is active and user didn't disable
         try:
@@ -1480,6 +1518,13 @@ class trainModel():
     def _rt_on_epoch_end(self, global_epoch: int):
         if not getattr(self, "_rt_enabled", False):
             self._rt_epoch_active = False
+            try:
+                if wandb.run is not None:
+                    mem = self._mem_cuda_mem_payload()
+                    if mem:
+                        wandb.log({"epoch": int(global_epoch), **mem}, step=int(global_epoch))
+            except Exception:
+                pass
             return
 
         # wall time
@@ -1589,6 +1634,9 @@ class trainModel():
                         "TIME/backend": str(backend),
                         "TIME/rt_sample_every": int(getattr(self, "rt_sample_every", 0)),
                     })
+                mem = self._mem_cuda_mem_payload()
+                if mem:
+                    log_d.update(mem)
                 wandb.log(log_d, step=int(global_epoch))
         except Exception:
             pass
@@ -1706,6 +1754,12 @@ class trainModel():
 
     def _ecg_on_epoch_begin(self, global_epoch: int):
         """Apply ECG scheduling before the epoch starts."""
+
+        # --- CUDA memory (epoch window): reset peak stats before train/eval ---
+        try:
+            self._mem_reset_peak_for_epoch()
+        except Exception:
+            pass
 
         # --- ECG stats (epoch-level): reset accumulator ---
         self._ecg_stat_sum = {}
@@ -6131,47 +6185,6 @@ if __name__ == '__main__':
     _apply_stage2_from_args(args)
     print(f"[CFG] LOSS2 wrong={LOSS_2nd_stage_wrong}, correct={LOSS_2nd_stage_correct}, option={option_stage2}")
 
-def init_wandb_if_needed(args, default_name: str):
-    project = os.environ.get("WANDB_PROJECT", "ecg_binary_fast") #os.environ.get("WANDB_PROJECT", "ecg_binary_fast")
-    entity  = os.environ.get("WANDB_ENTITY", None)
-
-    name = os.environ.get("WANDB_NAME", None) or default_name
-
-    group = os.environ.get("WANDB_GROUP", None) or f"{args.dataset}_seed{args.seed}_T{args.stop_val}"
-
-    # labels：sanity / official / method
-    tags_env = os.environ.get("WANDB_TAGS", "")
-    tags = [t.strip() for t in tags_env.split(",") if t.strip()]
-
-    # default tag
-    base_tags = {
-        args.dataset, f"seed{args.seed}", f"s1{args.stage1_epochs}", f"s2{args.stage2_epochs}",
-        f"loss2_{args.loss_stage2}", f"pe_{args.pe_mode}",
-    }
-    tags = sorted(set(tags) | base_tags)
-    # wandb allows tags between 1 and 64 chars
-    WANDB_MAX_TAG_LEN = 64
-    tags = [t[:WANDB_MAX_TAG_LEN] if len(t) > WANDB_MAX_TAG_LEN else t for t in tags]
-
-    job_type = os.environ.get("WANDB_JOB_TYPE", None)
-
-    wandb.init(
-        project=project,
-        entity=entity,
-        name=name,
-        group=group,
-        tags=tags,
-        job_type=job_type,
-        config=vars(args),
-    )
-
-    # override PE mode from CLI
-    PE_MODE = args.pe_mode
-    Normalize_entropy = (PE_MODE in ("logk", "logk_rms"))  # none/raw = no PE normalization
-    USE_PE_RMS = (PE_MODE == "logk_rms")
-
-    print(f"[CFG] pe_mode={PE_MODE} Normalize_entropy={Normalize_entropy} USE_PE_RMS={USE_PE_RMS} seed={args.seed}")
-
 def set_seed(seed: int, deterministic: bool = False):
     """
     Set seeds for python/numpy/torch. If deterministic=True, enable stricter deterministic settings.
@@ -6243,8 +6256,14 @@ def init_wandb_if_needed(args, default_name: str):
     # Make charts use "epoch" as x-axis by default (instead of Step)
     try:
         wandb.define_metric("epoch")
-        for prefix in ("train/*", "STD/*", "PGD/*", "ECG/*", "ADV/*", "C/*", "LT/*", "TIME/*", "config/*"):
+        for prefix in ("train/*", "STD/*", "PGD/*", "ECG/*", "ADV/*", "C/*", "LT/*", "TIME/*", "MEM/*", "config/*"):
             wandb.define_metric(prefix, step_metric="epoch")
+    except Exception:
+        pass
+
+    try:
+        if wandb.run is not None and torch.cuda.is_available():
+            wandb.log({"MEM/device_name": torch.cuda.get_device_name(0)}, step=0)
     except Exception:
         pass
 
