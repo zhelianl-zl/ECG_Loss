@@ -1,0 +1,10 @@
+#wandb_project=ecg-cifar10
+dataset	seed	stop	stop_val	lr	momentum	batch	workers	half_prec	variants	type	stage1_epochs	stage2_epochs	loss_stage1	loss_stage2	ecg_conf_type	ecg_detach_gates	ecg_schedule	ecg_lam	ecg_tau	ecg_k	ecg_lam_start	ecg_lam_end	ecg_tau_start	ecg_tau_end	ecg_k_start	ecg_k_end	ecg_tau_target	ecg_tau_lr	ecg_tau_ema	ecg_tau_deadzone	method_name	run_kind
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	logit_gap_norm	True	linear	0.0	0.80	15	auto_tr_autocap	0.05	q	0.61	20	20					ECG_logitgap_q0p60_k20_autocap	r2
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	logit_gap_norm	True	linear	0.0	0.80	15	auto_tr_autocap	0.05	q	0.62	20	20					ECG_logitgap_q0p65_k20_autocap	r2
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	logit_gap_norm	True	linear	0.0	0.80	15	auto_tr_autocap	0.05	q	0.63	20	20					ECG_logitgap_q0p70_k20_autocap	r2
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	logit_gap_norm	True	linear	0.0	0.80	15	auto_tr_autocap	0.05	q	0.64	20	20					ECG_logitgap_q0p75_k20_autocap	r2
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	logit_gap_norm	True	linear	0.0	0.80	15	auto_tr_autocap	0.05	q	0.66	20	20					ECG_logitgap_q0p80_k20_autocap	r2
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	logit_gap_norm	True	linear	0.0	0.80	15	auto_tr_autocap	0.05	q	0.67	20	20					ECG_logitgap_q0p85_k20_autocap	r2
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	logit_gap_norm	True	linear	0.0	0.80	15	auto_tr_autocap	0.05	q	0.68	20	20					ECG_logitgap_q0p90_k20_autocap	r2
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	60	0	ecg	ecg	logit_gap_norm	True	linear	0.0	0.80	15	auto_tr_autocap	0.05	q	0.69	20	20					ECG_logitgap_q0p90_k20_autocap	r2

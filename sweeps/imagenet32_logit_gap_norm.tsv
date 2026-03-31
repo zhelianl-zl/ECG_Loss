@@ -1,0 +1,4 @@
+#wandb_project=cegs-imageNet32-pmax
+dataset	seed	stop	stop_val	lr	momentum	batch	workers	half_prec	variants	type	pe_mode	stage1_epochs	stage2_epochs	loss_stage1	loss_stage2	ecg_conf_type	ecg_detach_gates	ecg_schedule	ecg_lam_start	ecg_lam_end	ecg_tau_start	ecg_tau_end	ecg_k_start	ecg_k_end	force_run	method_name	run_kind	stage2_fast	stage2_find_every	stage2_ce_log_every
+imageNet	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	auto_tr_autocap	0.05	auto_q	0.38_0.65	20	20	True	imnet32_pmax_autoq0p40_k20_autocap	official	True	10	20
+imageNet	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	auto_tr_autocap	0.05	auto_q	0.38_0.67	20	20	True	imnet32_pmax_autoq0p40_k20_autocap	official	True	10	20

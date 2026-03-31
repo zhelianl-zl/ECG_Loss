@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls /ocean/projects/cis260049p/zliu49/cegs/ECG_Loss/sweeps/imagenet32_log_pmax_sweep*.tsv)"
+    ]
+  }
+}

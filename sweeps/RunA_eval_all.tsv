@@ -1,0 +1,64 @@
+#slurm_logs_dir=/ocean/projects/cis260049p/zliu49/cegs/ECG_Loss/slurm_logs
+#runs_dir=/ocean/projects/cis260049p/zliu49/cegs_runs
+#data_dir=/ocean/projects/cis260049p/zliu49/cegs
+dataset	source_job	source_task	attacks	adv_eps	adv_steps	c_corruptions	c_severity	imbalance	wandb_project	wandb_group	wandb_name	env_IMAGENET_ORIGINAL	env_IMAGENET_RES	env_IMAGENET_DS_ROOT	env_DL_WORKERS
+# ===================== Binary (no C-corruption) =====================
+binaryCifar10	37988109	0	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval-binary	eval_binary	eval_binary_CE_eps4
+binaryCifar10	37988109	0	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval-binary	eval_binary	eval_binary_CE_eps2
+binaryCifar10	38017823	1	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval-binary	eval_binary	eval_binary_ECGS_eps4
+binaryCifar10	38017823	1	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval-binary	eval_binary	eval_binary_ECGS_eps2
+binaryCifar10	38252258	2	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval-binary	eval_binary	eval_binary_CLUE_eps4
+binaryCifar10	38252258	2	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval-binary	eval_binary	eval_binary_CLUE_eps2
+binaryCifar10	38252258	3	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval-binary	eval_binary	eval_binary_EUAT_eps4
+binaryCifar10	38252258	3	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval-binary	eval_binary	eval_binary_EUAT_eps2
+binaryCifar10	38252258	4	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval-binary	eval_binary	eval_binary_PGDAT_eps4
+binaryCifar10	38252258	4	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval-binary	eval_binary	eval_binary_PGDAT_eps2
+binaryCifar10	38252258	5	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval-binary	eval_binary	eval_binary_TRADES_eps4
+binaryCifar10	38252258	5	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval-binary	eval_binary	eval_binary_TRADES_eps2
+binaryCifar10	38252258	6	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval-binary	eval_binary	eval_binary_MART_eps4
+binaryCifar10	38252258	6	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval-binary	eval_binary	eval_binary_MART_eps2
+# ===================== CIFAR-10 (adv + C-corruption) =====================
+cifar10	38127587	0	fgsm,pgd_linf,pgd_linf_rs	4	20	gaussian_noise,shot_noise,impulse_noise,defocus_blur,glass_blur,motion_blur,zoom_blur,snow,frost,fog,brightness,contrast,elastic_transform,pixelate,jpeg_compression	5	none	ecgs-eval-cifar10	eval_cifar10	eval_c10_CE_eps4
+cifar10	38127587	0	fgsm,pgd_linf,pgd_linf_rs	2	20	gaussian_noise,shot_noise,impulse_noise,defocus_blur,glass_blur,motion_blur,zoom_blur,snow,frost,fog,brightness,contrast,elastic_transform,pixelate,jpeg_compression	5	none	ecgs-eval-cifar10	eval_cifar10	eval_c10_CE_eps2
+cifar10	38127145	0	fgsm,pgd_linf,pgd_linf_rs	4	20	gaussian_noise,shot_noise,impulse_noise,defocus_blur,glass_blur,motion_blur,zoom_blur,snow,frost,fog,brightness,contrast,elastic_transform,pixelate,jpeg_compression	5	none	ecgs-eval-cifar10	eval_cifar10	eval_c10_ECGS_eps4
+cifar10	38127145	0	fgsm,pgd_linf,pgd_linf_rs	2	20	gaussian_noise,shot_noise,impulse_noise,defocus_blur,glass_blur,motion_blur,zoom_blur,snow,frost,fog,brightness,contrast,elastic_transform,pixelate,jpeg_compression	5	none	ecgs-eval-cifar10	eval_cifar10	eval_c10_ECGS_eps2
+cifar10	38254282	2	fgsm,pgd_linf,pgd_linf_rs	4	20	gaussian_noise,shot_noise,impulse_noise,defocus_blur,glass_blur,motion_blur,zoom_blur,snow,frost,fog,brightness,contrast,elastic_transform,pixelate,jpeg_compression	5	none	ecgs-eval-cifar10	eval_cifar10	eval_c10_CLUE_eps4
+cifar10	38254282	2	fgsm,pgd_linf,pgd_linf_rs	2	20	gaussian_noise,shot_noise,impulse_noise,defocus_blur,glass_blur,motion_blur,zoom_blur,snow,frost,fog,brightness,contrast,elastic_transform,pixelate,jpeg_compression	5	none	ecgs-eval-cifar10	eval_cifar10	eval_c10_CLUE_eps2
+cifar10	38254282	3	fgsm,pgd_linf,pgd_linf_rs	4	20	gaussian_noise,shot_noise,impulse_noise,defocus_blur,glass_blur,motion_blur,zoom_blur,snow,frost,fog,brightness,contrast,elastic_transform,pixelate,jpeg_compression	5	none	ecgs-eval-cifar10	eval_cifar10	eval_c10_EUAT_eps4
+cifar10	38254282	3	fgsm,pgd_linf,pgd_linf_rs	2	20	gaussian_noise,shot_noise,impulse_noise,defocus_blur,glass_blur,motion_blur,zoom_blur,snow,frost,fog,brightness,contrast,elastic_transform,pixelate,jpeg_compression	5	none	ecgs-eval-cifar10	eval_cifar10	eval_c10_EUAT_eps2
+cifar10	38254282	4	fgsm,pgd_linf,pgd_linf_rs	4	20	gaussian_noise,shot_noise,impulse_noise,defocus_blur,glass_blur,motion_blur,zoom_blur,snow,frost,fog,brightness,contrast,elastic_transform,pixelate,jpeg_compression	5	none	ecgs-eval-cifar10	eval_cifar10	eval_c10_PGDAT_eps4
+cifar10	38254282	4	fgsm,pgd_linf,pgd_linf_rs	2	20	gaussian_noise,shot_noise,impulse_noise,defocus_blur,glass_blur,motion_blur,zoom_blur,snow,frost,fog,brightness,contrast,elastic_transform,pixelate,jpeg_compression	5	none	ecgs-eval-cifar10	eval_cifar10	eval_c10_PGDAT_eps2
+cifar10	38254282	5	fgsm,pgd_linf,pgd_linf_rs	4	20	gaussian_noise,shot_noise,impulse_noise,defocus_blur,glass_blur,motion_blur,zoom_blur,snow,frost,fog,brightness,contrast,elastic_transform,pixelate,jpeg_compression	5	none	ecgs-eval-cifar10	eval_cifar10	eval_c10_TRADES_eps4
+cifar10	38254282	5	fgsm,pgd_linf,pgd_linf_rs	2	20	gaussian_noise,shot_noise,impulse_noise,defocus_blur,glass_blur,motion_blur,zoom_blur,snow,frost,fog,brightness,contrast,elastic_transform,pixelate,jpeg_compression	5	none	ecgs-eval-cifar10	eval_cifar10	eval_c10_TRADES_eps2
+cifar10	38254282	6	fgsm,pgd_linf,pgd_linf_rs	4	20	gaussian_noise,shot_noise,impulse_noise,defocus_blur,glass_blur,motion_blur,zoom_blur,snow,frost,fog,brightness,contrast,elastic_transform,pixelate,jpeg_compression	5	none	ecgs-eval-cifar10	eval_cifar10	eval_c10_MART_eps4
+cifar10	38254282	6	fgsm,pgd_linf,pgd_linf_rs	2	20	gaussian_noise,shot_noise,impulse_noise,defocus_blur,glass_blur,motion_blur,zoom_blur,snow,frost,fog,brightness,contrast,elastic_transform,pixelate,jpeg_compression	5	none	ecgs-eval-cifar10	eval_cifar10	eval_c10_MART_eps2
+cifar10	38256413	0	fgsm,pgd_linf,pgd_linf_rs	4	20	gaussian_noise,shot_noise,impulse_noise,defocus_blur,glass_blur,motion_blur,zoom_blur,snow,frost,fog,brightness,contrast,elastic_transform,pixelate,jpeg_compression	5	none	ecgs-eval-cifar10	eval_cifar10	eval_c10_MART_warmup10_eps4
+cifar10	38256413	0	fgsm,pgd_linf,pgd_linf_rs	2	20	gaussian_noise,shot_noise,impulse_noise,defocus_blur,glass_blur,motion_blur,zoom_blur,snow,frost,fog,brightness,contrast,elastic_transform,pixelate,jpeg_compression	5	none	ecgs-eval-cifar10	eval_cifar10	eval_c10_MART_warmup10_eps2
+# ===================== CIFAR-100 (adv + C-corruption) =====================
+cifar100	37991463	0	fgsm,pgd_linf,pgd_linf_rs	4	20	gaussian_noise,shot_noise,impulse_noise,defocus_blur,glass_blur,motion_blur,zoom_blur,snow,frost,fog,brightness,contrast,elastic_transform,pixelate,jpeg_compression	5	none	ecgs-eval-cifar100	eval_cifar100	eval_c100_CE_eps4
+cifar100	37991463	0	fgsm,pgd_linf,pgd_linf_rs	2	20	gaussian_noise,shot_noise,impulse_noise,defocus_blur,glass_blur,motion_blur,zoom_blur,snow,frost,fog,brightness,contrast,elastic_transform,pixelate,jpeg_compression	5	none	ecgs-eval-cifar100	eval_cifar100	eval_c100_CE_eps2
+cifar100	38007062	1	fgsm,pgd_linf,pgd_linf_rs	4	20	gaussian_noise,shot_noise,impulse_noise,defocus_blur,glass_blur,motion_blur,zoom_blur,snow,frost,fog,brightness,contrast,elastic_transform,pixelate,jpeg_compression	5	none	ecgs-eval-cifar100	eval_cifar100	eval_c100_ECGS_eps4
+cifar100	38007062	1	fgsm,pgd_linf,pgd_linf_rs	2	20	gaussian_noise,shot_noise,impulse_noise,defocus_blur,glass_blur,motion_blur,zoom_blur,snow,frost,fog,brightness,contrast,elastic_transform,pixelate,jpeg_compression	5	none	ecgs-eval-cifar100	eval_cifar100	eval_c100_ECGS_eps2
+cifar100	38253746	2	fgsm,pgd_linf,pgd_linf_rs	4	20	gaussian_noise,shot_noise,impulse_noise,defocus_blur,glass_blur,motion_blur,zoom_blur,snow,frost,fog,brightness,contrast,elastic_transform,pixelate,jpeg_compression	5	none	ecgs-eval-cifar100	eval_cifar100	eval_c100_CLUE_eps4
+cifar100	38253746	2	fgsm,pgd_linf,pgd_linf_rs	2	20	gaussian_noise,shot_noise,impulse_noise,defocus_blur,glass_blur,motion_blur,zoom_blur,snow,frost,fog,brightness,contrast,elastic_transform,pixelate,jpeg_compression	5	none	ecgs-eval-cifar100	eval_cifar100	eval_c100_CLUE_eps2
+cifar100	38253746	3	fgsm,pgd_linf,pgd_linf_rs	4	20	gaussian_noise,shot_noise,impulse_noise,defocus_blur,glass_blur,motion_blur,zoom_blur,snow,frost,fog,brightness,contrast,elastic_transform,pixelate,jpeg_compression	5	none	ecgs-eval-cifar100	eval_cifar100	eval_c100_EUAT_eps4
+cifar100	38253746	3	fgsm,pgd_linf,pgd_linf_rs	2	20	gaussian_noise,shot_noise,impulse_noise,defocus_blur,glass_blur,motion_blur,zoom_blur,snow,frost,fog,brightness,contrast,elastic_transform,pixelate,jpeg_compression	5	none	ecgs-eval-cifar100	eval_cifar100	eval_c100_EUAT_eps2
+cifar100	38256334	0	fgsm,pgd_linf,pgd_linf_rs	4	20	gaussian_noise,shot_noise,impulse_noise,defocus_blur,glass_blur,motion_blur,zoom_blur,snow,frost,fog,brightness,contrast,elastic_transform,pixelate,jpeg_compression	5	none	ecgs-eval-cifar100	eval_cifar100	eval_c100_PGDAT_eps4
+cifar100	38256334	0	fgsm,pgd_linf,pgd_linf_rs	2	20	gaussian_noise,shot_noise,impulse_noise,defocus_blur,glass_blur,motion_blur,zoom_blur,snow,frost,fog,brightness,contrast,elastic_transform,pixelate,jpeg_compression	5	none	ecgs-eval-cifar100	eval_cifar100	eval_c100_PGDAT_eps2
+cifar100	38256334	1	fgsm,pgd_linf,pgd_linf_rs	4	20	gaussian_noise,shot_noise,impulse_noise,defocus_blur,glass_blur,motion_blur,zoom_blur,snow,frost,fog,brightness,contrast,elastic_transform,pixelate,jpeg_compression	5	none	ecgs-eval-cifar100	eval_cifar100	eval_c100_TRADES_eps4
+cifar100	38256334	1	fgsm,pgd_linf,pgd_linf_rs	2	20	gaussian_noise,shot_noise,impulse_noise,defocus_blur,glass_blur,motion_blur,zoom_blur,snow,frost,fog,brightness,contrast,elastic_transform,pixelate,jpeg_compression	5	none	ecgs-eval-cifar100	eval_cifar100	eval_c100_TRADES_eps2
+cifar100	38256334	2	fgsm,pgd_linf,pgd_linf_rs	4	20	gaussian_noise,shot_noise,impulse_noise,defocus_blur,glass_blur,motion_blur,zoom_blur,snow,frost,fog,brightness,contrast,elastic_transform,pixelate,jpeg_compression	5	none	ecgs-eval-cifar100	eval_cifar100	eval_c100_MART_eps4
+cifar100	38256334	2	fgsm,pgd_linf,pgd_linf_rs	2	20	gaussian_noise,shot_noise,impulse_noise,defocus_blur,glass_blur,motion_blur,zoom_blur,snow,frost,fog,brightness,contrast,elastic_transform,pixelate,jpeg_compression	5	none	ecgs-eval-cifar100	eval_cifar100	eval_c100_MART_eps2
+# ===================== SVHN (no C-corruption) =====================
+svhn	37991813	0	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval-svhn	eval_svhn	eval_svhn_CE_eps4
+svhn	37991813	0	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval-svhn	eval_svhn	eval_svhn_CE_eps2
+svhn	38017315	0	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval-svhn	eval_svhn	eval_svhn_ECGS_60ep_eps4
+svhn	38017315	0	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval-svhn	eval_svhn	eval_svhn_ECGS_60ep_eps2
+svhn	38084356	1	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval-svhn	eval_svhn	eval_svhn_ECGS_50ep_eps4
+svhn	38084356	1	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval-svhn	eval_svhn	eval_svhn_ECGS_50ep_eps2
+svhn	38253772	4	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval-svhn	eval_svhn	eval_svhn_PGDAT_eps4
+svhn	38253772	4	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval-svhn	eval_svhn	eval_svhn_PGDAT_eps2
+svhn	38253772	5	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval-svhn	eval_svhn	eval_svhn_TRADES_eps4
+svhn	38253772	5	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval-svhn	eval_svhn	eval_svhn_TRADES_eps2
+svhn	38253772	6	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval-svhn	eval_svhn	eval_svhn_MART_eps4
+svhn	38253772	6	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval-svhn	eval_svhn	eval_svhn_MART_eps2

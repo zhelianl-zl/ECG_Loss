@@ -1,18 +1,3 @@
 #wandb_project=ecg_binary_pmax
 dataset	seed	stop	stop_val	lr	momentum	batch	workers	half_prec	variants	type	pe_mode	stage1_epochs	stage2_epochs	loss_stage1	loss_stage2	ecg_conf_type	ecg_detach_gates	ecg_schedule	ecg_lam_start	ecg_lam_end	ecg_tau_start	ecg_tau_end	ecg_k_start	ecg_k_end	force_run	method_name	run_kind
-# 0) CE 对照（确保这批环境/评测没漂）
-binaryCifar10	0	epochs	100	0.01	0.9	64	0	False	none	std	logk_rms	100	0	ce	ce	none	True	none	0	0	0	0	0	0	True	seed0_ce100_ref	finish
-# 1) 当前最有趣：t7 原版（ECG40->CE60）
-binaryCifar10	0	epochs	100	0.01	0.9	64	0	False	none	std	logk_rms	40	60	ecg	ce	pmax	True	linear	0.05	0.15	0.65	0.93	8	15	True	seed0_ecg40_ce60_base	finish
-# 2) 提前切 CE：看能否减少后期抖动（ECG30->CE70）
-binaryCifar10	0	epochs	100	0.01	0.9	64	0	False	none	std	logk_rms	30	70	ecg	ce	pmax	True	linear	0.05	0.15	0.65	0.93	8	15	True	seed0_ecg30_ce70_base	finish
-# 3) 更挑剔 gate：tau_start 提高（更稳方向）
-binaryCifar10	0	epochs	100	0.01	0.9	64	0	False	none	std	logk_rms	40	60	ecg	ce	pmax	True	linear	0.05	0.15	0.70	0.93	8	15	True	seed0_ecg40_ce60_tau70_93	finish
-# 4) 更弱 lam_end：抑制后期波动（更稳方向）
-binaryCifar10	0	epochs	100	0.01	0.9	64	0	False	none	std	logk_rms	40	60	ecg	ce	pmax	True	linear	0.05	0.12	0.65	0.93	8	15	True	seed0_ecg40_ce60_lam05_12	finish
-# 5) 更小 lr：经典稳态化（最推荐的“稳住 t7”手段）
-binaryCifar10	0	epochs	100	0.005	0.9	64	0	False	none	std	logk_rms	40	60	ecg	ce	pmax	True	linear	0.05	0.15	0.65	0.93	8	15	True	seed0_ecg40_ce60_lr005	finish
-# 6) 延长周期：保持 ECG40，但把 CE 尾巴拉长到 110（总 150）
-binaryCifar10	0	epochs	150	0.01	0.9	64	0	False	none	std	logk_rms	40	110	ecg	ce	pmax	True	linear	0.05	0.15	0.65	0.93	8	15	True	seed0_long150_ecg40_ce110_base	finish
-# 7) 延长 + 稳定：长跑也用 lr=0.005（通常能把抖动压下去）
-binaryCifar10	0	epochs	150	0.005	0.9	64	0	False	none	std	logk_rms	40	110	ecg	ce	pmax	True	linear	0.05	0.15	0.65	0.93	8	15	True	seed0_long150_ecg40_ce110_lr005	finish
+binaryCifar10	0	epochs	150	0.01	0.9	64	0	False	none	std	logk_rms	150	0	ecg	ce	pmax	True	linear	auto_tr_autocap	0.05	auto_q	0.76	20	20	True	autoDW005_q70_k20_ecg40_ce110_r1_pmaxlin	autoLam

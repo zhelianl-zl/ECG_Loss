@@ -1,0 +1,42 @@
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from /jet/home/zliu49/.netrc.
+wandb: Currently logged in as: zhelianl (zhelianl-carnegie-mellon-university) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: setting up run bs1oqfbo
+wandb: Tracking run with wandb version 0.25.0
+wandb: Run data is saved locally in /ocean/projects/cis260049p/zliu49/cegs/ECG_Loss/wandb/run-20260313_151335-bs1oqfbo
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run eval_cifar10_ECGS_best
+wandb: ⭐️ View project at https://wandb.ai/zhelianl-carnegie-mellon-university/ecg-cifar10
+wandb: 🚀 View run at https://wandb.ai/zhelianl-carnegie-mellon-university/ecg-cifar10/runs/bs1oqfbo
+wandb: updating run metadata
+wandb: uploading history steps 0-1, summary, console lines 17-19
+wandb: 
+wandb: Run history:
+wandb:                  ADV/fgsm/eps8/Acc ▁█
+wandb:                ADV/fgsm/eps8/Error █▁
+wandb:                 ADV/fgsm/eps8/Loss ▁█
+wandb:      ADV/pgd_linf/eps8/steps20/Acc █▁
+wandb:    ADV/pgd_linf/eps8/steps20/Error ▁█
+wandb:     ADV/pgd_linf/eps8/steps20/Loss ▁█
+wandb:   ADV/pgd_linf_rs/eps8/steps20/Acc █▁
+wandb: ADV/pgd_linf_rs/eps8/steps20/Error ▁█
+wandb:  ADV/pgd_linf_rs/eps8/steps20/Loss ▁█
+wandb:                          PGD/Error ▁█
+wandb:                                 +4 ...
+wandb: 
+wandb: Run summary:
+wandb:                  ADV/fgsm/eps8/Acc 0.352
+wandb:                ADV/fgsm/eps8/Error 0.648
+wandb:                 ADV/fgsm/eps8/Loss 2.77489
+wandb:      ADV/pgd_linf/eps8/steps20/Acc 0.2387
+wandb:    ADV/pgd_linf/eps8/steps20/Error 0.7613
+wandb:     ADV/pgd_linf/eps8/steps20/Loss 3.79385
+wandb:   ADV/pgd_linf_rs/eps8/steps20/Acc 0.2462
+wandb: ADV/pgd_linf_rs/eps8/steps20/Error 0.7538
+wandb:  ADV/pgd_linf_rs/eps8/steps20/Loss 3.73814
+wandb:                          PGD/Error 0.7613
+wandb:                                 +4 ...
+wandb: 
+wandb: 🚀 View run eval_cifar10_ECGS_best at: https://wandb.ai/zhelianl-carnegie-mellon-university/ecg-cifar10/runs/bs1oqfbo
+wandb: ⭐️ View project at: https://wandb.ai/zhelianl-carnegie-mellon-university/ecg-cifar10
+wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/run-20260313_151335-bs1oqfbo/logs

@@ -1,0 +1,10 @@
+#wandb_project=ecgs-logpmax-best
+dataset	seed	stop	stop_val	lr	momentum	batch	workers	half_prec	variants	type	pe_mode	stage1_epochs	stage2_epochs	loss_stage1	loss_stage2	ecg_conf_type	ecg_detach_gates	ecg_schedule	ecg_lam_start	ecg_lam_end	ecg_tau_start	ecg_tau_end	ecg_k_start	ecg_k_end	force_run	method_name	run_kind	stage2_fast	stage2_find_every	stage2_ce_log_every	wandb_project	wandb_group	wandb_name
+# --- log_pmax best tau per dataset (q_end defaults to 0.7) ---
+binaryCifar10	0	epochs	150	0.01	0.9	64	0	False	none	std	logk_rms	150	0	ecg	ecg	log_pmax	True	linear	auto_tr_autocap	0.05	auto_q	0.40	20	20	True	binary_logpmax_best_q0.40	official				ecg_binary_pmax	logpmax_best	binary_logpmax_best_q0.40
+cifar10	0	epochs	60	0.1	0.9	64	0	False	none	std	logk_rms	60	0	ecg	ecg	log_pmax	True	linear	auto_tr_autocap	0.05	auto_q	0.39	20	20	True	c10_logpmax_best_q0.39	official				ecg-cifar10-01	logpmax_best	c10_logpmax_best_q0.39
+cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	log_pmax	True	linear	auto_tr_autocap	0.05	auto_q	0.40	20	20	True	c100_logpmax_best_q0.40	official				ecg-cifar100-pmax	logpmax_best	c100_logpmax_best_q0.40
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	log_pmax	True	linear	auto_tr_autocap	0.05	auto_q	0.70	20	20	True	svhn_logpmax_best_q0.70	official				ecg-svhn-pmax	logpmax_best	svhn_logpmax_best_q0.70
+imageNet	0	epochs	50	0.01	0.9	64	0	True	none	std	logk_rms	50	0	ecg	ecg	log_pmax	True	linear	auto_tr_autocap	0.05	auto_q	0.38	20	20	True	imnet32_logpmax_best_q0.38_50ep	official	True	10	20	cegs-imageNet32-pmax	logpmax_best	imnet32_logpmax_best_q0.38_50ep
+imageNet	0	epochs	50	0.01	0.9	64	0	True	none	std	logk_rms	50	0	ecg	ecg	log_pmax	True	linear	auto_tr_autocap	0.05	auto_q	0.39	20	20	True	imnet32_logpmax_best_q0.39_50ep	official	True	10	20	cegs-imageNet32-pmax	logpmax_best	imnet32_logpmax_best_q0.39_50ep
+imageNet	0	epochs	50	0.01	0.9	64	0	True	none	std	logk_rms	50	0	ecg	ecg	log_pmax	True	linear	auto_tr_autocap	0.05	auto_q	0.40	20	20	True	imnet32_logpmax_best_q0.40_50ep	official	True	10	20	cegs-imageNet32-pmax	logpmax_best	imnet32_logpmax_best_q0.40_50ep

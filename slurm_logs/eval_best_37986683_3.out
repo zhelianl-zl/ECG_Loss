@@ -1,0 +1,41 @@
+BASE=/ocean/projects/cis260049p/zliu49/cegs/ECG_Loss
+CONF=/ocean/projects/cis260049p/zliu49/cegs/ECG_Loss/sweeps/eval_best_runs.tsv
+RUNS_DIR=/ocean/projects/cis260049p/zliu49/cegs_runs
+HOST=v024.ib.bridges2.psc.edu
+TASK_ID=3
+START=2026-03-13T15:13:23-04:00
+Python 3.10.19
+GPU 0: Tesla V100-SXM2-32GB (UUID: GPU-9c9d6f32-3a27-5919-2132-b74f777e7d8b)
+Loaded 8 evaluation rows from /ocean/projects/cis260049p/zliu49/cegs/ECG_Loss/sweeps/eval_best_runs.tsv
+
+######################################################################
+  [row 3]  eval_cifar10_ECGS_best
+######################################################################
+Resolved job=37899839 task=7 -> /ocean/projects/cis260049p/zliu49/cegs_runs/cegs_37899839_7/src/models
+Dataset: cifar10  |  Checkpoints: 2  |  Device: cuda
+
+============================================================
+  Epoch 5  |  modelcifar10_std_train_lr0.01_momentum0.9_batch64_lrAdv0.01_momentumAdv0.0_batchAdv100_peraw_s160_ecg_epoch5.pt
+============================================================
+  STD  Error=0.3074  Loss=0.9124
+  fgsm             Error=0.6758  Acc=0.3242  Loss=2.5425  (5.9s)
+  pgd_linf         Error=0.7481  Acc=0.2519  Loss=3.0250  (66.6s)
+  pgd_linf_rs      Error=0.7442  Acc=0.2558  Loss=2.9987  (66.9s)
+  [C] Could not load gaussian_noise s5: [Errno 2] No such file or directory: '/ocean/projects/cis260049p/zliu49/cegs/ECG_Loss/../data/CIFAR-10-C/gaussian_noise.npy'
+  [C] Could not load brightness s5: [Errno 2] No such file or directory: '/ocean/projects/cis260049p/zliu49/cegs/ECG_Loss/../data/CIFAR-10-C/brightness.npy'
+
+============================================================
+  Epoch 10  |  modelcifar10_std_train_lr0.01_momentum0.9_batch64_lrAdv0.01_momentumAdv0.0_batchAdv100_peraw_s160_ecg_epoch10.pt
+============================================================
+  STD  Error=0.1957  Loss=0.5935
+  fgsm             Error=0.6480  Acc=0.3520  Loss=2.7749  (6.1s)
+  pgd_linf         Error=0.7613  Acc=0.2387  Loss=3.7939  (66.9s)
+  pgd_linf_rs      Error=0.7538  Acc=0.2462  Loss=3.7381  (67.0s)
+  [C] Could not load gaussian_noise s5: [Errno 2] No such file or directory: '/ocean/projects/cis260049p/zliu49/cegs/ECG_Loss/../data/CIFAR-10-C/gaussian_noise.npy'
+  [C] Could not load brightness s5: [Errno 2] No such file or directory: '/ocean/projects/cis260049p/zliu49/cegs/ECG_Loss/../data/CIFAR-10-C/brightness.npy'
+W&B run finished.
+
+Done. Evaluated 2 checkpoints.
+
+All done.
+END=2026-03-13T15:18:26-04:00

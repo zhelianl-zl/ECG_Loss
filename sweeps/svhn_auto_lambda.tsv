@@ -1,4 +1,10 @@
-#wandb_project=ecg-svhn-pmax
+#wandb_project=ecg-svhn-pmax-01
 dataset	seed	stop	stop_val	lr	momentum	batch	workers	half_prec	variants	type	pe_mode	stage1_epochs	stage2_epochs	loss_stage1	loss_stage2	ecg_conf_type	ecg_detach_gates	ecg_schedule	ecg_lam_start	ecg_lam_end	ecg_tau_start	ecg_tau_end	ecg_k_start	ecg_k_end	force_run	method_name	run_kind
-svhn	0	epochs	100	0.01	0.9	64	0	True	none	std	logk_rms	100	0	ce	ce	none	True	none	0	0	0	0	0	0	True	svhn_ce60_baseline_pmaxlin	ablation
-svhn	0	epochs	100	0.01	0.9	64	0	True	none	std	logk_rms	100	0	ecg	ecg	pmax	True	linear	auto_dw	0.05	auto_q	0.60	20	20	True	svhn_autoDW_autoQ06_k20_pmaxlin	ablation
+svhn	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	auto_tr_autocap	0.05	auto_q	0.55	20	20	True	svhn_autoDW_autoQ06_k20_pmaxlin	ablation
+svhn	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	auto_tr_autocap	0.05	auto_q	0.60	20	20	True	svhn_autoDW_autoQ06_k20_pmaxlin	ablation
+svhn	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	auto_tr_autocap	0.05	auto_q	0.65	20	20	True	svhn_autoDW_autoQ06_k20_pmaxlin	ablation
+svhn	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	auto_tr_autocap	0.05	auto_q	0.70	20	20	True	svhn_autoDW_autoQ06_k20_pmaxlin	ablation
+svhn	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	auto_tr_autocap	0.05	auto_q	0.75	20	20	True	svhn_autoDW_autoQ06_k20_pmaxlin	ablation
+svhn	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	auto_tr_autocap	0.05	auto_q	0.80	20	20	True	svhn_autoDW_autoQ06_k20_pmaxlin	ablation
+svhn	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	auto_tr_autocap	0.05	auto_q	0.85	20	20	True	svhn_autoDW_autoQ06_k20_pmaxlin	ablation
+svhn	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	auto_tr_autocap	0.05	auto_q	0.50	20	20	True	svhn_autoDW_autoQ06_k20_pmaxlin	ablation

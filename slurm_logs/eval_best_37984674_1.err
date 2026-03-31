@@ -1,0 +1,42 @@
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from /jet/home/zliu49/.netrc.
+wandb: Currently logged in as: zhelianl (zhelianl-carnegie-mellon-university) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: setting up run kurt0ypn
+wandb: Tracking run with wandb version 0.25.0
+wandb: Run data is saved locally in /ocean/projects/cis260049p/zliu49/cegs/ECG_Loss/wandb/run-20260313_134137-kurt0ypn
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run eval_binaryCifar10_ECGS_best
+wandb: ⭐️ View project at https://wandb.ai/zhelianl-carnegie-mellon-university/ecg_binary_pmax
+wandb: 🚀 View run at https://wandb.ai/zhelianl-carnegie-mellon-university/ecg_binary_pmax/runs/kurt0ypn
+wandb: updating run metadata
+wandb: uploading output.log; uploading wandb-summary.json; uploading config.yaml
+wandb: 
+wandb: Run history:
+wandb:                  ADV/fgsm/eps8/Acc ▆▇██▇▆▅▁▆▇▅▃▃▂▄▄▃▃▅▄▂▃▅▄▆▇▄▅▅▆
+wandb:                ADV/fgsm/eps8/Error ▃▂▁▁▂▃▄█▃▂▄▆▆▇▅▅▆▆▄▅▇▆▄▅▃▂▅▄▄▃
+wandb:                 ADV/fgsm/eps8/Loss ▁▁▁▁▂▂▃▅▃▄▄▄▆▇▇▆▅█▄▅█▂▄▄▃▃▅▅▂▄
+wandb:      ADV/pgd_linf/eps8/steps20/Acc ▇▇██▇▆▅▂▅▆▅▃▄▂▄▃▃▃▄▄▂▁▅▄▅▅▄▆▅▆
+wandb:    ADV/pgd_linf/eps8/steps20/Error ▂▂▁▁▂▃▄▇▄▃▄▆▅▇▅▆▆▆▅▅▇█▄▅▄▄▅▃▄▃
+wandb:     ADV/pgd_linf/eps8/steps20/Loss ▁▁▁▁▂▂▃▅▃▄▄▄▆▇▇▆▅█▄▅█▂▃▄▃▃▄▄▂▄
+wandb:   ADV/pgd_linf_rs/eps8/steps20/Acc ▇▇██▇▆▅▂▅▆▅▃▄▂▄▃▃▃▄▄▂▁▅▄▅▅▅▆▅▆
+wandb: ADV/pgd_linf_rs/eps8/steps20/Error ▂▂▁▁▂▃▄▇▄▃▄▆▅▇▅▆▆▆▅▅▇█▄▅▄▄▄▃▄▃
+wandb:  ADV/pgd_linf_rs/eps8/steps20/Loss ▁▁▁▁▂▂▃▅▃▄▄▄▆▇▇▆▅█▄▅█▂▃▄▃▃▄▄▂▄
+wandb:                          PGD/Error ▂▂▁▁▂▃▄▇▄▃▄▆▅▇▅▆▆▆▅▅▇█▄▅▄▄▅▃▄▃
+wandb:                                 +4 ...
+wandb: 
+wandb: Run summary:
+wandb:                  ADV/fgsm/eps8/Acc 0.4965
+wandb:                ADV/fgsm/eps8/Error 0.5035
+wandb:                 ADV/fgsm/eps8/Loss 2.76978
+wandb:      ADV/pgd_linf/eps8/steps20/Acc 0.4645
+wandb:    ADV/pgd_linf/eps8/steps20/Error 0.5355
+wandb:     ADV/pgd_linf/eps8/steps20/Loss 3.03943
+wandb:   ADV/pgd_linf_rs/eps8/steps20/Acc 0.4675
+wandb: ADV/pgd_linf_rs/eps8/steps20/Error 0.5325
+wandb:  ADV/pgd_linf_rs/eps8/steps20/Loss 3.01557
+wandb:                          PGD/Error 0.5355
+wandb:                                 +4 ...
+wandb: 
+wandb: 🚀 View run eval_binaryCifar10_ECGS_best at: https://wandb.ai/zhelianl-carnegie-mellon-university/ecg_binary_pmax/runs/kurt0ypn
+wandb: ⭐️ View project at: https://wandb.ai/zhelianl-carnegie-mellon-university/ecg_binary_pmax
+wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/run-20260313_134137-kurt0ypn/logs

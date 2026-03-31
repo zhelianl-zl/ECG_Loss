@@ -1,0 +1,3 @@
+cifar10:
+cifar10	0	epochs	60	0.1	0.9	64	0	False	none	std	60	0	ce	ce	none	True	none	0	0	0	0	0	0	0	0	0				cifar10_CE_baseline	r2
+

@@ -1,0 +1,11 @@
+#wandb_project=ecg-svhn-pmax
+dataset	seed	stop	stop_val	lr	momentum	batch	workers	half_prec	variants	type	pe_mode	stage1_epochs	stage2_epochs	loss_stage1	loss_stage2	ecg_conf_type	ecg_detach_gates	ecg_schedule	ecg_lam_start	ecg_lam_end	ecg_tau_start	ecg_tau_end	ecg_k_start	ecg_k_end	force_run	method_name	run_kind	wandb_project	wandb_group	wandb_name
+# --- svhn log_pmax sweep: 8 tau quantiles, k=20 ---
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	log_pmax	True	linear	auto_tr_autocap	0.05	auto_q	0.40	20	20	True	svhn_logpmax_q0.40_k20	autoLam	ecg-svhn-pmax	svhn_logpmax	svhn_logpmax_q0.40_k20
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	log_pmax	True	linear	auto_tr_autocap	0.05	auto_q	0.50	20	20	True	svhn_logpmax_q0.50_k20	autoLam	ecg-svhn-pmax	svhn_logpmax	svhn_logpmax_q0.50_k20
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	log_pmax	True	linear	auto_tr_autocap	0.05	auto_q	0.60	20	20	True	svhn_logpmax_q0.60_k20	autoLam	ecg-svhn-pmax	svhn_logpmax	svhn_logpmax_q0.60_k20
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	log_pmax	True	linear	auto_tr_autocap	0.05	auto_q	0.65	20	20	True	svhn_logpmax_q0.65_k20	autoLam	ecg-svhn-pmax	svhn_logpmax	svhn_logpmax_q0.65_k20
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	log_pmax	True	linear	auto_tr_autocap	0.05	auto_q	0.70	20	20	True	svhn_logpmax_q0.70_k20	autoLam	ecg-svhn-pmax	svhn_logpmax	svhn_logpmax_q0.70_k20
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	log_pmax	True	linear	auto_tr_autocap	0.05	auto_q	0.75	20	20	True	svhn_logpmax_q0.75_k20	autoLam	ecg-svhn-pmax	svhn_logpmax	svhn_logpmax_q0.75_k20
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	log_pmax	True	linear	auto_tr_autocap	0.05	auto_q	0.80	20	20	True	svhn_logpmax_q0.80_k20	autoLam	ecg-svhn-pmax	svhn_logpmax	svhn_logpmax_q0.80_k20
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	log_pmax	True	linear	auto_tr_autocap	0.05	auto_q	0.85	20	20	True	svhn_logpmax_q0.85_k20	autoLam	ecg-svhn-pmax	svhn_logpmax	svhn_logpmax_q0.85_k20

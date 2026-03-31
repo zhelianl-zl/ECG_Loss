@@ -1,0 +1,10 @@
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from /jet/home/zliu49/.netrc.
+wandb: Currently logged in as: zhelianl (zhelianl-carnegie-mellon-university) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: setting up run cxocucnq
+wandb: Tracking run with wandb version 0.25.0
+wandb: Run data is saved locally in /ocean/projects/cis260049p/zliu49/cegs/ECG_Loss/wandb/run-20260313_152131-cxocucnq
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run eval_cifar100_ECGS_best
+wandb: ⭐️ View project at https://wandb.ai/zhelianl-carnegie-mellon-university/ecg-cifar100-pmax
+wandb: 🚀 View run at https://wandb.ai/zhelianl-carnegie-mellon-university/ecg-cifar100-pmax/runs/cxocucnq
+slurmstepd: error: *** JOB 37986683 ON v024 CANCELLED AT 2026-03-13T15:43:16 ***

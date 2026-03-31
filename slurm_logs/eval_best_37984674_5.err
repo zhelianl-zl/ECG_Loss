@@ -1,0 +1,9 @@
+Traceback (most recent call last):
+  File "/ocean/projects/cis260049p/zliu49/cegs/ECG_Loss/tools/eval_batch.py", line 127, in main
+    run_eval(args)
+  File "/ocean/projects/cis260049p/zliu49/cegs/ECG_Loss/tools/eval_checkpoints.py", line 395, in run_eval
+    ckpt_dir = resolve_job_models_dir(runs_dir, args.job, args.task)
+  File "/ocean/projects/cis260049p/zliu49/cegs/ECG_Loss/tools/eval_checkpoints.py", line 376, in resolve_job_models_dir
+    raise FileNotFoundError(
+FileNotFoundError: No run directory found for job=37912723 task=0 under /ocean/projects/cis260049p/zliu49/cegs_runs
+  Tried: /ocean/projects/cis260049p/zliu49/cegs_runs/*37912723*_0/src/models
