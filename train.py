@@ -2476,7 +2476,26 @@ class trainModel():
             print(f"[STAGE2-ROBUST] method={_train_mode}  eps={getattr(self, 'robust_eps', 0):.4f}"
                   f"  alpha={getattr(self, 'robust_alpha', 0):.4f}  steps={getattr(self, 'robust_steps', 10)}"
                   f"  beta={getattr(self, 'robust_beta', 6.0)}", flush=True)
-            for ep in range(1, max_stage2_epochs + 1):
+
+            _rob_resume_ep = 0
+            _model_dir = os.path.join(os.path.dirname(__file__), "models")
+            for _chk_ep in range(max_stage2_epochs, 0, -1):
+                _chk_global = _chk_ep + iterations
+                _chk_path = os.path.join(_model_dir, f"{ckptName}_epoch{_chk_global}.pt")
+                if os.path.isfile(_chk_path):
+                    print(f"=> loading robust checkpoint '{_chk_path}'")
+                    _chk = torch.load(_chk_path, map_location="cpu")
+                    model.load_state_dict(_chk['state_dict'])
+                    opt.load_state_dict(_chk['optimizer'])
+                    t1 = time.time() - _chk['training_time']
+                    _rob_resume_ep = _chk_ep
+                    print(f"=> Resumed robust {_train_mode} from epoch {_chk_global} "
+                          f"(stage2 ep {_chk_ep}/{max_stage2_epochs})")
+                    break
+            if _rob_resume_ep == 0:
+                print("[STAGE2-ROBUST] No checkpoint found, starting from epoch 1")
+
+            for ep in range(_rob_resume_ep + 1, max_stage2_epochs + 1):
                 global_epoch = ep + iterations
                 self._current_epoch = global_epoch
                 self._ecg_on_epoch_begin(global_epoch)
