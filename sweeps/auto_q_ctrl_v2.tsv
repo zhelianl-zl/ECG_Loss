@@ -1,0 +1,8 @@
+#note=auto_q_ctrl v1: P-controller q, frac_start=(1-q_start) frac_target=0.10/0.20, pmax + auto_tr_autocap
+dataset	seed	stop	stop_val	lr	momentum	batch	workers	half_prec	variants	type	pe_mode	stage1_epochs	stage2_epochs	loss_stage1	loss_stage2	ecg_conf_type	ecg_detach_gates	ecg_schedule	ecg_lam_start	ecg_lam_end	ecg_tau_start	ecg_tau_end	ecg_k_start	ecg_k_end	force_run	method_name	run_kind	stage2_fast	stage2_find_every	stage2_ce_log_every	wandb_project	wandb_group	wandb_name
+# --- frac_target=0.20 ---
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	auto_tr_autocap	0.05	auto_q_ctrl	0.20_0.20	20	20	True	svhn_autoq_ctrl_f20_f20	official				ecg-svhn-pmax	auto_q_ctrl_v1	svhn_autoq_ctrl_f20_f20
+binaryCifar10	0	epochs	150	0.01	0.9	64	0	False	none	std	logk_rms	150	0	ecg	ecg	pmax	True	linear	auto_tr_autocap	0.05	auto_q_ctrl	0.24_0.20	20	20	True	binary_autoq_ctrl_f24_f20	official				ecg_binary_pmax	auto_q_ctrl_v1	binary_autoq_ctrl_f24_f20
+cifar10	0	epochs	60	0.1	0.9	64	0	False	none	std	none	60	0	ecg	ecg	pmax	True	linear	auto_tr_autocap	0.05	auto_q_ctrl	0.28_0.20	20	20	True	c10_autoq_ctrl_f28_f20	official				ecg-cifar10-01	auto_q_ctrl_v1	c10_autoq_ctrl_f28_f20
+cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	auto_tr_autocap	0.05	auto_q_ctrl	0.30_0.20	20	20	True	c100_autoq_ctrl_f30_f20	official				ecg-cifar100-pmax	auto_q_ctrl_v1	c100_autoq_ctrl_f30_f20
+imageNet	0	epochs	50	0.01	0.9	64	0	True	none	std	logk_rms	50	0	ecg	ecg	pmax	True	linear	auto_tr_autocap	0.05	auto_q_ctrl	0.64_0.20	20	20	True	imnet32_autoq_ctrl_f64_f20	official	True	10	20	cegs-imageNet32-pmax	auto_q_ctrl_v1	imnet32_autoq_ctrl_f64_f20

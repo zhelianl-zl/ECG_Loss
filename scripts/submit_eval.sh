@@ -2,7 +2,7 @@
 set -euo pipefail
 
 CONF_PATH="${1:-sweeps/RunA_eval.tsv}"
-MAX_PARALLEL="${2:-14}"
+MAX_PARALLEL="${2:-}"
 
 # Optional positional overrides:
 #   $3: GPU model or full GRES (e.g., "h100-80" or "gpu:h100-80:1")
@@ -27,7 +27,7 @@ ACCOUNT="${ACCOUNT:-cis260049p}"
 PARTITION="${PARTITION:-GPU-shared}"
 QOS="${QOS:-}"
 GRES="${GRES:-gpu:v100-32:1}"
-TIME="${TIME:-12:00:00}"
+TIME="${TIME:-1-00:00:00}"
 
 
 # QOS handling:
@@ -84,6 +84,9 @@ if [[ "$N" -le 0 ]]; then
   echo "ERROR: TSV must have header + >=1 data row: $CONF" >&2
   exit 2
 fi
+
+# Default MaxParallel = N (run all tasks in parallel)
+MAX_PARALLEL="${MAX_PARALLEL:-$N}"
 
 # Choose workspace root (prefer Ocean)
 OCEAN_USER_DIR="/ocean/projects/${ACCOUNT}/${USER}"

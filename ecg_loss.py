@@ -95,11 +95,17 @@ def ecg_loss(logits, targets, lam=1.0, tau=0.7, k=10.0, conf_type="pmax", detach
         gate_p99_val = torch.quantile(g_flat, 0.99).item()
     active_frac_val = (conf_gate > 0.5).float().mean().item()
 
+    # conf histogram for auto_q_valley (50 fixed bins over [0, 1])
+    _CONF_HIST_BINS = 50
+    c_flat_hist = conf.detach().float().view(-1)
+    conf_hist_counts = torch.histc(c_flat_hist, bins=_CONF_HIST_BINS, min=0.0, max=1.0)
+
     stats = {
         "gate_mean": gate_mean_val,
         "gate_p95": gate_p95_val,
         "gate_p99": gate_p99_val,
         "conf_gate_active_frac": active_frac_val,
+        "_conf_hist": conf_hist_counts.cpu().tolist(),  # list of 50 floats; accumulated across batches
     }
     if scale_normalize:
         s_flat = scale.detach().float().view(-1)

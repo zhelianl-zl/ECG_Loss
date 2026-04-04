@@ -1,0 +1,16 @@
+#note=auto_q_valley v2: valley-detection q, pmax + auto_tr_autocap, warmup=5 vs warmup=0 (fix: skip conf<0.1 bins)
+dataset	seed	stop	stop_val	lr	momentum	batch	workers	half_prec	variants	type	pe_mode	stage1_epochs	stage2_epochs	loss_stage1	loss_stage2	ecg_conf_type	ecg_detach_gates	ecg_schedule	ecg_lam_start	ecg_lam_end	ecg_tau_start	ecg_tau_end	ecg_k_start	ecg_k_end	force_run	method_name	run_kind	stage2_fast	stage2_find_every	stage2_ce_log_every	wandb_project	wandb_group	wandb_name	ecg_tau_valley_warmup	env_IMAGENET_ORIGINAL	env_IMAGENET_RES	env_IMAGENET_DS_ROOT
+# --- warmup=5 (default) ---
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	auto_tr_autocap	0.05	auto_q_valley	0.80	20	20	True	svhn_valley_v2_w5	official				ecg-svhn-pmax	auto_q_valley_v2	svhn_valley_v2_w5	5
+binaryCifar10	0	epochs	150	0.01	0.9	64	0	False	none	std	logk_rms	150	0	ecg	ecg	pmax	True	linear	auto_tr_autocap	0.05	auto_q_valley	0.76	20	20	True	binary_valley_v2_w5	official				ecg_binary_pmax	auto_q_valley_v2	binary_valley_v2_w5	5
+cifar10	0	epochs	60	0.1	0.9	64	0	False	none	std	none	60	0	ecg	ecg	pmax	True	linear	auto_tr_autocap	0.05	auto_q_valley	0.72	20	20	True	c10_valley_v2_w5	official				ecg-cifar10-01	auto_q_valley_v2	c10_valley_v2_w5	5
+cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	auto_tr_autocap	0.05	auto_q_valley	0.70	20	20	True	c100_valley_v2_w5	official				ecg-cifar100-pmax	auto_q_valley_v2	c100_valley_v2_w5	5
+imageNet	0	epochs	50	0.01	0.9	64	0	True	none	std	logk_rms	50	0	ecg	ecg	pmax	True	linear	auto_tr_autocap	0.05	auto_q_valley	0.36	20	20	True	imnet32_valley_v2_w5	official	True	10	20	cegs-imageNet32-pmax	auto_q_valley_v2	imnet32_valley_v2_w5	5	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32
+# --- warmup=0 (no warmup) ---
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	auto_tr_autocap	0.05	auto_q_valley	0.80	20	20	True	svhn_valley_v2_w0	official				ecg-svhn-pmax	auto_q_valley_v2	svhn_valley_v2_w0	0
+binaryCifar10	0	epochs	150	0.01	0.9	64	0	False	none	std	logk_rms	150	0	ecg	ecg	pmax	True	linear	auto_tr_autocap	0.05	auto_q_valley	0.76	20	20	True	binary_valley_v2_w0	official				ecg_binary_pmax	auto_q_valley_v2	binary_valley_v2_w0	0
+cifar10	0	epochs	60	0.1	0.9	64	0	False	none	std	none	60	0	ecg	ecg	pmax	True	linear	auto_tr_autocap	0.05	auto_q_valley	0.72	20	20	True	c10_valley_v2_w0	official				ecg-cifar10-01	auto_q_valley_v2	c10_valley_v2_w0	0
+cifar100	0	epochs	60	0.1	0.9	64	0	True	none	std	logk_rms	60	0	ecg	ecg	pmax	True	linear	auto_tr_autocap	0.05	auto_q_valley	0.70	20	20	True	c100_valley_v2_w0	official				ecg-cifar100-pmax	auto_q_valley_v2	c100_valley_v2_w0	0
+imageNet	0	epochs	50	0.01	0.9	64	0	True	none	std	logk_rms	50	0	ecg	ecg	pmax	True	linear	auto_tr_autocap	0.05	auto_q_valley	0.36	20	20	True	imnet32_valley_v2_w0	official	True	10	20	cegs-imageNet32-pmax	auto_q_valley_v2	imnet32_valley_v2_w0	0	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32
+# --- CE baseline (imagenet1k, matches imnet32_ce_j38264075_t0) ---
+imageNet	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	60	0	ce	ce	none	True	none							True	imnet32_1k_ce_60ep	baseline_main	True	10	20	cegs-imageNet32-pmax	auto_q_valley_v2	imnet32_1k_ce_60ep	standard									True	True					20	True

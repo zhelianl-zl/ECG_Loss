@@ -96,6 +96,12 @@ rsync -a --delete \
 
 mkdir -p "$RUN/src/logs" "$RUN/src/models"
 
+# If MODELS_SRC is set, copy checkpoints into the run's models dir (for resume)
+if [[ -n "${MODELS_SRC:-}" && -d "$MODELS_SRC" ]]; then
+  echo "Copying checkpoints from MODELS_SRC=$MODELS_SRC"
+  cp "$MODELS_SRC"/*.pt "$RUN/src/models/" 2>/dev/null || true
+fi
+
 COMMIT="$(cd "$BASE" && git rev-parse --short HEAD)"
 echo "$COMMIT" > "$RUN/commit.txt"
 echo "COMMIT=$COMMIT"

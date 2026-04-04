@@ -1368,8 +1368,9 @@ class trainModel():
             self.ecg_lam_start = self.ecg_lam_base if lam_start is None else float(lam_start)
             self.ecg_lam_end = self.ecg_lam_base if lam_end is None else float(lam_end)
 
-        # tau: support "quantile" (fixed q) and "auto_q" (scheduled q) via tau_rule
-        if getattr(self, "ecg_tau_rule", None) in ("quantile", "auto_q"):
+        # tau: support "quantile" (fixed q), "auto_q" (scheduled q), "auto_q_ctrl" (P-controller q),
+        #      and "auto_q_valley" (valley-detection q) via tau_rule
+        if getattr(self, "ecg_tau_rule", None) in ("quantile", "auto_q", "auto_q_ctrl", "auto_q_valley"):
             self.ecg_tau_start = None
             self.ecg_tau_end = None
         else:
@@ -1394,7 +1395,7 @@ class trainModel():
         if self.ecg_schedule in ("linear", "cosine"):
             if getattr(self, "ecg_lam_rule", None) not in _AUTO_LAM_RULES and self.ecg_lam_start is not None:
                 self.ecg_lam = float(self.ecg_lam_start)
-            if getattr(self, "ecg_tau_rule", None) not in ("quantile", "auto_q"):
+            if getattr(self, "ecg_tau_rule", None) not in ("quantile", "auto_q", "auto_q_ctrl", "auto_q_valley"):
                 self.ecg_tau = float(self.ecg_tau_start) if self.ecg_tau_start is not None else self.ecg_tau_base
             self.ecg_k = float(self.ecg_k_start)
         elif self.ecg_schedule == "tau_target":
@@ -1800,7 +1801,7 @@ class trainModel():
         if sched in ("linear", "cosine"):
             t = self._ecg_schedule_progress(global_epoch)
             lam_auto = getattr(self, "ecg_lam_rule", None) in _AUTO_LAM_RULES
-            tau_quantile = getattr(self, "ecg_tau_rule", None) in ("quantile", "auto_q")
+            tau_quantile = getattr(self, "ecg_tau_rule", None) in ("quantile", "auto_q", "auto_q_ctrl", "auto_q_valley")
             if lam_auto and tau_quantile:
                 # both auto: only schedule k
                 if sched == "linear":
@@ -2045,6 +2046,119 @@ class trainModel():
             except Exception:
                 pass
             return
+
+        # --- auto_q_ctrl: P controller on quantile q to keep active gate fraction near target ---
+        if getattr(self, "ecg_tau_rule", None) == "auto_q_ctrl":
+            try:
+                n = int(getattr(self, "_ecg_stat_n", 0))
+                if n > 0:
+                    s = getattr(self, "_ecg_stat_sum", {}) or {}
+                    if "conf_gate_active_frac" in s:
+                        active = float(s["conf_gate_active_frac"]) / float(n)
+
+                        # EMA smoothing (reuses ecg_tau_ema)
+                        beta = float(getattr(self, "ecg_tau_ema", 0.9))
+                        prev = getattr(self, "_ecg_auto_q_ctrl_ema", None)
+                        ema = active if prev is None else beta * float(prev) + (1.0 - beta) * active
+                        self._ecg_auto_q_ctrl_ema = float(ema)
+
+                        target = float(getattr(self, "ecg_tau_q_ctrl_target", 0.3))
+                        err = ema - target  # positive: too many active gates → q too low → raise q
+
+                        deadzone = float(getattr(self, "ecg_tau_deadzone", 0.02))
+                        if abs(err) >= deadzone:
+                            q_cur = float(getattr(self, "ecg_tau_quantile_cur",
+                                                   getattr(self, "ecg_tau_q_start", 0.6)))
+                            lr_q  = float(getattr(self, "ecg_tau_lr", 0.05))
+                            q_new = q_cur + lr_q * err
+                            q_min = float(getattr(self, "ecg_tau_min", 0.1))
+                            q_max = float(getattr(self, "ecg_tau_max", 0.99))
+                            self.ecg_tau_quantile_cur = float(min(max(q_new, q_min), q_max))
+
+                        try:
+                            if wandb.run is not None:
+                                wandb.log({
+                                    "epoch": int(global_epoch),
+                                    "ECG/auto_q_ctrl_active_frac":     float(ema),
+                                    "ECG/auto_q_ctrl_raw_active_frac": float(active),
+                                    "ECG/auto_q_ctrl_target_frac":     float(target),
+                                    "ECG/auto_q_ctrl_err":             float(err),
+                                    "ECG/tau_q_cur":                   float(getattr(self, "ecg_tau_quantile_cur", 0.0)),
+                                }, step=int(global_epoch))
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+        # --- auto_q_valley: find confidence distribution valley each epoch, use it as q ---
+        if getattr(self, "ecg_tau_rule", None) == "auto_q_valley":
+            try:
+                warmup = int(getattr(self, "ecg_tau_valley_warmup", 5))
+                if int(global_epoch) > warmup:
+                    s = getattr(self, "_ecg_stat_sum", {}) or {}
+                    hist = s.get("_conf_hist", None)
+                    if hist is not None and len(hist) >= 3:
+                        import math as _math
+                        n_bins = len(hist)
+                        # Gaussian smooth (kernel width = ecg_tau_valley_smooth bins, default 3)
+                        smooth = max(1, int(getattr(self, "ecg_tau_valley_smooth", 3)))
+                        smoothed = [0.0] * n_bins
+                        total_counts = sum(hist) or 1.0
+                        for i in range(n_bins):
+                            w_sum = 0.0
+                            c_sum = 0.0
+                            for d in range(-smooth * 2, smooth * 2 + 1):
+                                j = i + d
+                                if 0 <= j < n_bins:
+                                    w = _math.exp(-0.5 * (d / max(smooth, 1)) ** 2)
+                                    c_sum += hist[j] * w
+                                    w_sum += w
+                            smoothed[i] = c_sum / (w_sum or 1.0)
+
+                        # Find first local minimum between bins.
+                        # Skip conf < 0.1 (bottom 10% of bins) to avoid edge noise.
+                        # Require the candidate to be below 80% of the global max.
+                        _bin_min = max(1, n_bins // 10)  # skip conf < 0.1
+                        valley_bin = None
+                        for i in range(_bin_min, n_bins - 1):
+                            if smoothed[i] <= smoothed[i - 1] and smoothed[i] <= smoothed[i + 1]:
+                                if smoothed[i] < max(smoothed) * 0.8:
+                                    valley_bin = i
+                                    break
+
+                        if valley_bin is not None:
+                            # Convert bin index to conf value
+                            valley_conf = (valley_bin + 0.5) / n_bins  # bin centre in [0,1]
+                            # Convert conf value to quantile using the accumulated histogram
+                            cum = 0.0
+                            q_valley = 0.5  # fallback
+                            for i, c in enumerate(hist):
+                                cum += c
+                                if cum / total_counts >= valley_conf:
+                                    q_valley = (i + 0.5) / n_bins
+                                    break
+                            # EMA smooth (reuses ecg_tau_ema)
+                            beta = float(getattr(self, "ecg_tau_ema", 0.9))
+                            prev_q = float(getattr(self, "ecg_tau_quantile_cur",
+                                                    getattr(self, "ecg_tau_q_start", 0.6)))
+                            q_new = beta * prev_q + (1.0 - beta) * q_valley
+                            q_min = float(getattr(self, "ecg_tau_min", 0.1))
+                            q_max = float(getattr(self, "ecg_tau_max", 0.99))
+                            self.ecg_tau_quantile_cur = float(min(max(q_new, q_min), q_max))
+
+                            try:
+                                if wandb.run is not None:
+                                    wandb.log({
+                                        "epoch": int(global_epoch),
+                                        "ECG/auto_q_valley_conf":    float(valley_conf),
+                                        "ECG/auto_q_valley_bin":     int(valley_bin),
+                                        "ECG/auto_q_valley_q_raw":   float(q_valley),
+                                        "ECG/tau_q_cur":             float(self.ecg_tau_quantile_cur),
+                                    }, step=int(global_epoch))
+                            except Exception:
+                                pass
+            except Exception:
+                pass
 
         if sched != "adaptive":
             return
@@ -3518,7 +3632,7 @@ class trainModel():
                     scale_normalize=use_lam_auto,
                     gate_temp=getattr(self, "ecg_gate_temp", 1.5),
                 )
-            elif ecg_tau_rule == "auto_q":
+            elif ecg_tau_rule in ("auto_q", "auto_q_ctrl", "auto_q_valley"):
                 tau_q = getattr(self, "ecg_tau_quantile_cur", getattr(self, "ecg_tau_q_start", 0.6))
                 # auto_tr_autocap_gate: weak anti-over-narrow correction
                 self._ecg_gate_q_base = tau_q
@@ -3605,6 +3719,18 @@ class trainModel():
                         self._ecg_stat_n = 0
                     self._ecg_stat_n += 1
                     for _k, _v in stats.items():
+                        if _k == "_conf_hist":
+                            # accumulate histogram bin counts as list (not averaged with _ecg_stat_n)
+                            try:
+                                _hist = list(_v)
+                                if "_conf_hist" not in self._ecg_stat_sum:
+                                    self._ecg_stat_sum["_conf_hist"] = [0.0] * len(_hist)
+                                self._ecg_stat_sum["_conf_hist"] = [
+                                    a + b for a, b in zip(self._ecg_stat_sum["_conf_hist"], _hist)
+                                ]
+                            except Exception:
+                                pass
+                            continue
                         try:
                             _fv = float(_v)
                         except Exception:
@@ -5834,8 +5960,20 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
         model_cnn.ecg_lam_rule = getattr(model_cnn, "ecg_lam_rule", None)
         _lam_start = float(_lam_start) if (_lam_start is not None and str(_lam_start).strip()) else None
         _lam_end = float(_lam_end) if (_lam_end is not None and str(_lam_end).strip()) else None
-    # Tau: auto_q (scheduled quantile q), quantile (fixed q), or numeric
-    # auto_q: ecg_tau_start=auto_q, ecg_tau_end=q_start or q_start_q_end (e.g. 0.6 or 0.6_0.85)
+    # Tau: auto_q (scheduled quantile q), auto_q_ctrl (P-controller q),
+    #      auto_q_valley (valley-detection q), quantile (fixed q), or numeric
+    # auto_q:        ecg_tau_start=auto_q,        ecg_tau_end=q_start or q_start_q_end (e.g. 0.6 or 0.6_0.85)
+    # auto_q_ctrl:   ecg_tau_start=auto_q_ctrl,   ecg_tau_end=frac_start_frac_target (e.g. 0.64_0.10)
+    #                Both values are active gate fractions (fraction of samples above tau threshold).
+    #                frac_start -> q_start = 1 - frac_start (initial quantile).
+    #                frac_target = target active fraction the P controller converges to.
+    #                Controller params reuse: ecg_tau_lr (step, def 0.05), ecg_tau_ema (smoothing, def 0.9),
+    #                ecg_tau_deadzone (dead zone, def 0.02), ecg_tau_min/max (q bounds, def 0.1/0.99).
+    # auto_q_valley: ecg_tau_start=auto_q_valley, ecg_tau_end=q_start (optional, default 0.6)
+    #                Detects valley in confidence distribution each epoch; q adapts automatically.
+    #                No frac_target needed. Params: ecg_tau_valley_warmup (epochs before adapting, def 5),
+    #                ecg_tau_valley_smooth (Gaussian kernel width in bins, def 3), ecg_tau_ema (def 0.9),
+    #                ecg_tau_min/max (q bounds, def 0.1/0.99).
     _tau_start, _tau_end = ecg_tau_start, ecg_tau_end
     if _tau_start is not None and str(_tau_start).strip().lower() == "auto_q":
         model_cnn.ecg_tau_rule = "auto_q"
@@ -5848,6 +5986,26 @@ def main(ckptName, runName, dataset_name, stop_val, stop,
             model_cnn.ecg_tau_q_start = float(_tau_end_str) if _tau_end_str else 0.6
             _auto_q_end_default = 0.7 if str(ecg_conf_type).strip().lower() == "log_pmax" else 0.9
             model_cnn.ecg_tau_q_end = _auto_q_end_default
+        model_cnn.ecg_tau_quantile_cur = float(model_cnn.ecg_tau_q_start)
+        _tau_start, _tau_end = None, None
+    elif _tau_start is not None and str(_tau_start).strip().lower() == "auto_q_ctrl":
+        model_cnn.ecg_tau_rule = "auto_q_ctrl"
+        _tau_end_str = str(_tau_end).strip() if _tau_end is not None else ""
+        if "_" in _tau_end_str:
+            _fs, _ft = _tau_end_str.split("_", 1)
+            _frac_start = float(_fs)
+            model_cnn.ecg_tau_q_start       = 1.0 - _frac_start   # convert fraction -> quantile
+            model_cnn.ecg_tau_q_ctrl_target = float(_ft)           # target active gate fraction
+        else:
+            _frac_start = float(_tau_end_str) if _tau_end_str else 0.4
+            model_cnn.ecg_tau_q_start       = 1.0 - _frac_start   # default frac_start=0.4 -> q=0.6
+            model_cnn.ecg_tau_q_ctrl_target = 0.1                  # default: equiv. to old q_end=0.9
+        model_cnn.ecg_tau_quantile_cur = float(model_cnn.ecg_tau_q_start)
+        _tau_start, _tau_end = None, None
+    elif _tau_start is not None and str(_tau_start).strip().lower() == "auto_q_valley":
+        model_cnn.ecg_tau_rule = "auto_q_valley"
+        _tau_end_str = str(_tau_end).strip() if _tau_end is not None else ""
+        model_cnn.ecg_tau_q_start = float(_tau_end_str) if _tau_end_str else 0.6
         model_cnn.ecg_tau_quantile_cur = float(model_cnn.ecg_tau_q_start)
         _tau_start, _tau_end = None, None
     elif _tau_start is not None and str(_tau_start).strip().lower() in ("quantile", "q"):
@@ -6076,7 +6234,16 @@ if __name__ == '__main__':
     parser.add_argument("--ecg_lam_beta", type=float, default=0.9, help="EMA beta for gate_mean in auto-lambda.")
     parser.add_argument("--ecg_lam_eps", type=float, default=1e-6, help="Eps in lam = delta/(gate_ema+eps) for auto-lambda.")
     parser.add_argument("--ecg_tau_start", type=str, default=None,
-                        help="Start tau, 'quantile'/'q' (fixed q), or 'auto_q' (scheduled q). For quantile: ecg_tau_end=q. For auto_q: ecg_tau_end=q_start (q_end defaults to 0.9) or q_start_q_end (e.g. 0.6_0.85).")
+                        help="Start tau, 'quantile'/'q' (fixed q), 'auto_q' (scheduled q), or 'auto_q_ctrl' (P-controller q). "
+                             "For quantile: ecg_tau_end=q. "
+                             "For auto_q: ecg_tau_end=q_start (q_end defaults to 0.9) or q_start_q_end (e.g. 0.6_0.85). "
+                             "For auto_q_ctrl: ecg_tau_end=frac_start_frac_target (e.g. 0.64_0.10); both are active gate fractions. "
+                             "frac_start is converted to q_start=1-frac_start internally. frac_target is the controller convergence target. "
+                             "For auto_q_valley: ecg_tau_end=q_start (optional, default 0.6); q adapts each epoch by detecting the valley "
+                             "in the confidence histogram. No frac_target needed. Extra params: ecg_tau_valley_warmup (def 5), "
+                             "ecg_tau_valley_smooth (def 3), ecg_tau_ema (def 0.9), ecg_tau_min/max (def 0.1/0.99). "
+                             "Controller params: ecg_tau_lr (step size, def 0.05), ecg_tau_ema (EMA smoothing, def 0.9), "
+                             "ecg_tau_deadzone (dead zone, def 0.02), ecg_tau_min/max (q bounds, def 0.1/0.99).")
     parser.add_argument("--ecg_tau_end", type=str, default=None,
                         help="End tau, or quantile value (e.g. 0.8) when ecg_tau_start=quantile.")
     parser.add_argument("--ecg_k_start", type=float, default=None)
@@ -6095,6 +6262,10 @@ if __name__ == '__main__':
                         help="Deadzone for tau_target updates. If |active_frac-target|<deadzone, do not update tau.")
     parser.add_argument("--ecg_tau_min", type=float, default=0.0)
     parser.add_argument("--ecg_tau_max", type=float, default=0.99)
+    parser.add_argument("--ecg_tau_valley_warmup", type=int, default=5,
+                        help="Epochs before auto_q_valley starts adapting q (default 5).")
+    parser.add_argument("--ecg_tau_valley_smooth", type=int, default=3,
+                        help="Gaussian kernel half-width in bins for confidence histogram smoothing in auto_q_valley (default 3).")
     # ---- tail-ratio auto-lambda (auto_tr) ----
     parser.add_argument("--ecg_tail_ratio_target", type=float, default=3.0,
                         help="Target tail amplification ratio (1+lam*g_p99)/(1+lam*g_mean) for auto_tr.")

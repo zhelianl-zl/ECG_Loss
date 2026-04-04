@@ -418,6 +418,11 @@ def main() -> None:
     _add_arg(cmd, "--ecg_tau_lr", hp, "ecg_tau_lr")
     _add_arg(cmd, "--ecg_tau_ema", hp, "ecg_tau_ema")
     _add_arg(cmd, "--ecg_tau_deadzone", hp, "ecg_tau_deadzone")
+    _add_arg(cmd, "--ecg_tau_min", hp, "ecg_tau_min")
+    _add_arg(cmd, "--ecg_tau_max", hp, "ecg_tau_max")
+    # auto_q_valley params (optional)
+    _add_arg(cmd, "--ecg_tau_valley_warmup", hp, "ecg_tau_valley_warmup")
+    _add_arg(cmd, "--ecg_tau_valley_smooth", hp, "ecg_tau_valley_smooth")
 
     # auto-lambda (optional overrides when ecg_lam_start=auto)
     _add_arg(cmd, "--ecg_lam_max", hp, "ecg_lam_max")

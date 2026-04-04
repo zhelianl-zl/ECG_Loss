@@ -1,7 +1,16 @@
 {
   "permissions": {
     "allow": [
-      "Bash(ls /ocean/projects/cis260049p/zliu49/cegs/ECG_Loss/sweeps/imagenet32_log_pmax_sweep*.tsv)"
+      "Bash(ls /ocean/projects/cis260049p/zliu49/cegs/ECG_Loss/sweeps/imagenet32_log_pmax_sweep*.tsv)",
+      "Bash(mv imagenet1k_pmax_tau35_40.tsv imagenet32_1k_pmax_tau35_40.tsv)",
+      "Bash(mv imagenet1k_robust_full.tsv imagenet32_1k_robust_full.tsv)",
+      "Bash(mv imageNet1k_mart_warmup.tsv imagenet32_1k_mart_warmup.tsv)",
+      "Bash(chmod +x /ocean/projects/cis260049p/zliu49/cegs/ECG_Loss/scripts/submit_eval.sh)",
+      "Read(//ocean/projects/cis260049p/zliu49/cegs_runs/**)",
+      "Bash(cp '/ocean/projects/cis260049p/zliu49/cegs_runs/cegs_38376084_0/src/models/*.pt' /ocean/projects/cis260049p/zliu49/cegs/ECG_Loss/models/)",
+      "Bash(cp '/ocean/projects/cis260049p/zliu49/cegs_runs/cegs_38376085_1/src/models/*.pt' /ocean/projects/cis260049p/zliu49/cegs/ECG_Loss/models/)",
+      "Bash(cp '/ocean/projects/cis260049p/zliu49/cegs_runs/cegs_38376086_2/src/models/*.pt' /ocean/projects/cis260049p/zliu49/cegs/ECG_Loss/models/)",
+      "Bash(cp '/ocean/projects/cis260049p/zliu49/cegs_runs/cegs_38376047_3/src/models/*.pt' /ocean/projects/cis260049p/zliu49/cegs/ECG_Loss/models/)"
     ]
   }
 }
