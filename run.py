@@ -368,7 +368,7 @@ if __name__ == "__main__":
 
     # 2) wandb init
     wandb.init(
-        project="adam-euat",
+        project="ecg-loss",
         name=f"cifar10_{train.PE_MODE}",
         config={
             "pe_mode": train.PE_MODE,

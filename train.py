@@ -2583,6 +2583,22 @@ class trainModel():
             _last_ce_loss = None
             _last_ce_err = None
 
+            # ===== STAGE2 batch_mix2 checkpoint resume =====
+            _model_dir = os.path.join(os.path.dirname(__file__), "models")
+            for _chk_ep in range(max_stage2_epochs, 0, -1):
+                _chk_global = _chk_ep + iterations
+                _chk_path = os.path.join(_model_dir, f"{ckptName}_epoch{_chk_global}.pt")
+                if os.path.isfile(_chk_path):
+                    print(f"=> loading stage2 checkpoint '{_chk_path}'", flush=True)
+                    _chk = torch.load(_chk_path, map_location="cpu")
+                    model.load_state_dict(_chk['state_dict'])
+                    opt.load_state_dict(_chk['optimizer'])
+                    t1 = time.time() - _chk['training_time']
+                    epoch_counter = _chk_ep + 1
+                    print(f"=> Resumed stage2 (euat) from epoch {_chk_global} (stage2_ep {_chk_ep}/{max_stage2_epochs})", flush=True)
+                    break
+            # ===============================================
+
             print("epoch number " + str(epoch_counter+iterations) + " and epoch size of " + str(epoch_dataSize))
             if stage2_fast:
                 print(f"[STAGE2] fast mode: find wrong every {stage2_find_every} epochs, log train CE every {stage2_ce_log_every} epochs", flush=True)

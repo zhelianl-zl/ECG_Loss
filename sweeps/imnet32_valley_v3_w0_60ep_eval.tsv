@@ -1,0 +1,7 @@
+#slurm_logs_dir=/ocean/projects/cis260049p/zliu49/cegs/ECG_Loss/slurm_logs
+#runs_dir=/ocean/projects/cis260049p/zliu49/cegs_runs
+#data_dir=/ocean/projects/cis260049p/zliu49/cegs
+dataset	source_job	source_task	attacks	adv_eps	adv_steps	c_corruptions	c_severity	imbalance	wandb_project	wandb_group	wandb_name	env_IMAGENET_ORIGINAL	env_IMAGENET_RES	env_IMAGENET_DS_ROOT	env_DL_WORKERS
+# ImageNet32 valley_v3_w0 60ep adv eval
+imageNet	38563229	0	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval-imnet32	valley_eval	eval_imnet32_valley_v3_w0_60ep_from38563229_0_eps4	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	10
+imageNet	38563229	0	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval-imnet32	valley_eval	eval_imnet32_valley_v3_w0_60ep_from38563229_0_eps2	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	10

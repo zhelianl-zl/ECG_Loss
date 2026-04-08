@@ -1,0 +1,4 @@
+	#wandb_project=cegs-imageNet32-pmax
+dataset	seed	stop	stop_val	lr	momentum	batch	workers	half_prec	variants	type	pe_mode	stage1_epochs	stage2_epochs	loss_stage1	loss_stage2	ecg_conf_type	ecg_detach_gates	ecg_schedule	ecg_lam_start	ecg_lam_end	ecg_tau_start	ecg_tau_end	ecg_k_start	ecg_k_end	force_run	method_name	run_kind	stage2_fast	stage2_find_every	stage2_ce_log_every	wandb_project	wandb_group	wandb_name	train_mode	focal_gamma	focal_alpha	clue_lambda	clue_detach_proxy	robust_eps	robust_alpha	robust_steps	robust_beta	robust_random_start	robust_pixel	clue_dropout_p	clue_mc_passes	clue_alpha	clue_enable_mcdo	rt_step_sample_every	rt_minimal_mode
+# --- imageNet-1k MART w10: resume 50ep -> 60ep ---
+imageNet	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	10	50	ce	ce	none	True	none							True	imagenet1k_mart_eps8_s10_b6_w10_60ep	baseline_main	True	10	20	cegs-imageNet32-pmax	imagenet1k_robust	imagenet1k_mart_eps8_s10_b6_w10_60ep	mart					8	2	10	6.0	True	True					20	True

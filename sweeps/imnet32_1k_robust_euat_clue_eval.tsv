@@ -1,0 +1,19 @@
+#slurm_logs_dir=/ocean/projects/cis260049p/zliu49/cegs/ECG_Loss/slurm_logs
+#runs_dir=/ocean/projects/cis260049p/zliu49/cegs_runs
+#data_dir=/ocean/projects/cis260049p/zliu49/cegs
+dataset	source_job	source_task	attacks	adv_eps	adv_steps	c_corruptions	c_severity	imbalance	wandb_project	wandb_group	wandb_name	env_IMAGENET_ORIGINAL	env_IMAGENET_RES	env_IMAGENET_DS_ROOT	env_DL_WORKERS
+# imagenet1k_pgdat_eps8_s10_60ep_j38553157_t0
+imageNet	38553157	0	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval-imnet32	imnet32_robust_eval	eval_imnet32_pgdat_60ep_from38553157_0_eps4	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	10
+imageNet	38553157	0	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval-imnet32	imnet32_robust_eval	eval_imnet32_pgdat_60ep_from38553157_0_eps2	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	10
+# imagenet1k_trades_eps8_s10_b6_60ep_j38591047_t0
+imageNet	38591047	0	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval-imnet32	imnet32_robust_eval	eval_imnet32_trades_60ep_from38591047_0_eps4	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	10
+imageNet	38591047	0	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval-imnet32	imnet32_robust_eval	eval_imnet32_trades_60ep_from38591047_0_eps2	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	10
+# imagenet1k_mart_eps8_s10_b6_w10_60ep_j38560085_t0
+imageNet	38560085	0	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval-imnet32	imnet32_robust_eval	eval_imnet32_mart_w10_60ep_from38560085_0_eps4	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	10
+imageNet	38560085	0	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval-imnet32	imnet32_robust_eval	eval_imnet32_mart_w10_60ep_from38560085_0_eps2	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	10
+# imnet32_euat_s30_ce_s30_euat_j38584725_t0
+imageNet	38584725	0	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval-imnet32	imnet32_robust_eval	eval_imnet32_euat_60ep_from38584725_0_eps4	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	10
+imageNet	38584725	0	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval-imnet32	imnet32_robust_eval	eval_imnet32_euat_60ep_from38584725_0_eps2	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	10
+# imnet32_clue_p0.3_mc5_a0.5_j38264075_t3 (actual rundir: cegs_38264221_3)
+imageNet	38264221	3	fgsm,pgd_linf,pgd_linf_rs	4	20			none	ecgs-eval-imnet32	imnet32_robust_eval	eval_imnet32_clue_60ep_from38264221_3_eps4	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	10
+imageNet	38264221	3	fgsm,pgd_linf,pgd_linf_rs	2	20			none	ecgs-eval-imnet32	imnet32_robust_eval	eval_imnet32_clue_60ep_from38264221_3_eps2	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	10
