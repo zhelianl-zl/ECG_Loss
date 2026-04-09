@@ -15,7 +15,7 @@ mkdir -p "$BASE/slurm_logs"
 
 sbatch -A cis260049p -p GPU-shared --gres=gpu:v100-32:1 -t 0-06:00:00 \
   --export=ALL \
-  --array=0-14 \
+  --array=0-29 \
   "$BASE/scripts/eval_array.sbatch"
 
-echo "Submitted autoattack_eval_v1: tasks 0-14, all parallel"
+echo "Submitted autoattack_eval_v1: tasks 0-29 (0-14=eps4, 15-29=eps2)"
