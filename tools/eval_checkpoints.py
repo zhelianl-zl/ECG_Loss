@@ -646,6 +646,15 @@ def find_checkpoints(ckpt_dir, pattern="*_epoch*.pt"):
     return result
 
 
+def _maybe_last_ckpt_only(ckpts, last_ckpt_only: bool):
+    """If True, keep only the highest-epoch checkpoint (final training state)."""
+    if not last_ckpt_only or len(ckpts) <= 1:
+        return ckpts
+    ep, path = ckpts[-1]
+    print(f"[eval] last_ckpt_only: using epoch {ep} only ({os.path.basename(path)})")
+    return [ckpts[-1]]
+
+
 def resolve_via_slurm_log(slurm_logs_dir, array_job, task):
     log_path = os.path.join(slurm_logs_dir, f"slurm_cegs_{array_job}_{task}.out")
     if not os.path.isfile(log_path):
@@ -758,6 +767,7 @@ def args_from_tsv(conf_path, idx):
         ckpt=None, ckpt_dir=_g(hp, "ckpt_dir") or None,
         runs_dir=runs_dir, slurm_logs_dir=slurm_logs_dir,
         pattern=_g(hp, "pattern", "*_epoch*.pt"),
+        last_ckpt_only=_g(hp, "last_ckpt_only", "false").lower() in ("1", "true", "yes"),
         dataset=_g(hp, "dataset") or None,
         device="cuda", batch_size=int(_g(hp, "batch_size", "64")),
         attacks=_g(hp, "attacks", "fgsm,pgd_linf,pgd_linf_rs"),
@@ -801,6 +811,10 @@ def run_eval(args):
     else:
         print("ERROR: no checkpoint source"); return
 
+    if not ckpts:
+        print("No checkpoints found."); return
+
+    ckpts = _maybe_last_ckpt_only(ckpts, bool(getattr(args, "last_ckpt_only", False)))
     if not ckpts:
         print("No checkpoints found."); return
 
@@ -969,6 +983,8 @@ def main():
     p.add_argument("--runs_dir", type=str, default=DEFAULT_RUNS_DIR)
     p.add_argument("--slurm_logs_dir", type=str, default="")
     p.add_argument("--pattern", type=str, default="*_epoch*.pt")
+    p.add_argument("--last_ckpt_only", action="store_true",
+                   help="Only evaluate the highest-epoch *_epoch*.pt (ignore intermediate checkpoints)")
     p.add_argument("--dataset", type=str, choices=list(DATASET_STATS.keys()))
     p.add_argument("--device", type=str, default="cuda")
     p.add_argument("--batch_size", type=int, default=64)
