@@ -391,27 +391,32 @@ def eval_autoattack(norm_model, loader, device, eps_01, norm="Linf", version="st
         adversary.attacks_to_run = ["apgd-ce", "square"]
         print(f"  [AutoAttack] {num_classes} classes: using apgd-ce + square only (DLR needs >=4 classes)")
 
-    dict_adv = adversary.run_standard_evaluation_individual(all_x, all_y, bs=batch_size)
+    import io, re
+    _old_stdout = sys.stdout
+    sys.stdout = _captured = io.StringIO()
+    try:
+        x_adv = adversary.run_standard_evaluation(all_x, all_y, bs=batch_size)
+    finally:
+        sys.stdout = _old_stdout
+    aa_output = _captured.getvalue()
+    print(aa_output, end="")
 
     results = {}
-    all_correct = torch.ones(n_total, dtype=torch.bool, device=device)
+    for m in re.finditer(r"robust accuracy after (.+?):\s+([\d.]+)%", aa_output, re.IGNORECASE):
+        atk_name = m.group(1).strip()
+        rob_acc = float(m.group(2)) / 100.0
+        results[f"{atk_name}/Acc"] = rob_acc
+        results[f"{atk_name}/Error"] = 1.0 - rob_acc
 
-    for atk_name, x_adv_atk in dict_adv.items():
-        with torch.no_grad():
-            correct = torch.ones(n_total, dtype=torch.bool, device=device)
-            for i in range(0, n_total, batch_size):
-                xb = x_adv_atk[i:i + batch_size]
-                yb = all_y[i:i + batch_size]
-                correct[i:i + len(yb)] = (norm_model(xb).argmax(1) == yb)
-            all_correct &= correct
-        atk_acc = correct.float().mean().item()
-        results[f"{atk_name}/Error"] = 1.0 - atk_acc
-        results[f"{atk_name}/Acc"] = atk_acc
-        print(f"  AA/{atk_name:12s}  Err={1.0 - atk_acc:.4f}  Acc={atk_acc:.4f}")
-
-    combined_acc = all_correct.float().mean().item()
-    results["Error"] = 1.0 - combined_acc
-    results["Acc"] = combined_acc
+    with torch.no_grad():
+        total_err, n = 0, 0
+        for i in range(0, len(x_adv), batch_size):
+            xb, yb = x_adv[i:i + batch_size], all_y[i:i + batch_size]
+            total_err += (norm_model(xb).argmax(1) != yb).sum().item()
+            n += len(yb)
+    err = total_err / n
+    results["Error"] = err
+    results["Acc"] = 1.0 - err
     return results
 
 
