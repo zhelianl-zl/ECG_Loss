@@ -24,6 +24,7 @@ Usage:
 
 import os
 import sys
+import contextlib
 import glob
 import pickle
 import random
@@ -382,7 +383,6 @@ def eval_autoattack(norm_model, loader, device, eps_01, norm="Linf", version="st
         all_y.append(y)
     all_x = torch.cat(all_x).to(device)
     all_y = torch.cat(all_y).to(device)
-    n_total = len(all_y)
 
     adversary = AutoAttack(norm_model, norm=norm, eps=eps_01, version=version, verbose=True)
 
@@ -391,22 +391,41 @@ def eval_autoattack(norm_model, loader, device, eps_01, norm="Linf", version="st
         adversary.attacks_to_run = ["apgd-ce", "square"]
         print(f"  [AutoAttack] {num_classes} classes: using apgd-ce + square only (DLR needs >=4 classes)")
 
-    import io, re
-    _old_stdout = sys.stdout
-    sys.stdout = _captured = io.StringIO()
-    try:
+    import io
+
+    _captured = io.StringIO()
+    with contextlib.redirect_stdout(_captured), contextlib.redirect_stderr(_captured):
         x_adv = adversary.run_standard_evaluation(all_x, all_y, bs=batch_size)
-    finally:
-        sys.stdout = _old_stdout
     aa_output = _captured.getvalue()
     print(aa_output, end="")
 
+    def _aa_sanitize(name: str) -> str:
+        # W&B / chart search: avoid deep paths with hyphens (APGD-T hard to find)
+        return re.sub(r"[^A-Za-z0-9]+", "_", name.strip()).strip("_").lower()
+
     results = {}
-    for m in re.finditer(r"robust accuracy after (.+?):\s+([\d.]+)%", aa_output, re.IGNORECASE):
-        atk_name = m.group(1).strip()
-        rob_acc = float(m.group(2)) / 100.0
-        results[f"{atk_name}/Acc"] = rob_acc
-        results[f"{atk_name}/Error"] = 1.0 - rob_acc
+    # Locale-safe: 41.45% or 41,45%; also tolerate spaces before %
+    _pat = re.compile(
+        r"robust accuracy after\s+([^:\n]+?):\s*([\d.,]+)\s*%",
+        re.IGNORECASE | re.MULTILINE,
+    )
+    for m in _pat.finditer(aa_output):
+        atk_raw = m.group(1).strip()
+        num_s = m.group(2).strip().replace(",", ".")
+        try:
+            pct = float(num_s)
+            rob_acc = pct / 100.0 if pct > 1.0 else pct
+            rob_acc = min(max(rob_acc, 0.0), 1.0)
+        except ValueError:
+            continue
+        key = _aa_sanitize(atk_raw)
+        if not key:
+            continue
+        results[f"{key}/Acc"] = rob_acc
+        results[f"{key}/Error"] = 1.0 - rob_acc
+
+    if not any("/" in k for k in results):
+        print("  [WARN] AutoAttack: no per-step lines matched; expected 'robust accuracy after …: xx.xx%'")
 
     with torch.no_grad():
         total_err, n = 0, 0
