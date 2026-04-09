@@ -382,6 +382,7 @@ def eval_autoattack(norm_model, loader, device, eps_01, norm="Linf", version="st
         all_y.append(y)
     all_x = torch.cat(all_x).to(device)
     all_y = torch.cat(all_y).to(device)
+    n_total = len(all_y)
 
     adversary = AutoAttack(norm_model, norm=norm, eps=eps_01, version=version, verbose=True)
 
@@ -390,16 +391,28 @@ def eval_autoattack(norm_model, loader, device, eps_01, norm="Linf", version="st
         adversary.attacks_to_run = ["apgd-ce", "square"]
         print(f"  [AutoAttack] {num_classes} classes: using apgd-ce + square only (DLR needs >=4 classes)")
 
-    x_adv = adversary.run_standard_evaluation(all_x, all_y, bs=batch_size)
+    dict_adv = adversary.run_standard_evaluation_individual(all_x, all_y, bs=batch_size)
 
-    with torch.no_grad():
-        total_err, n = 0, 0
-        for i in range(0, len(x_adv), batch_size):
-            xb, yb = x_adv[i:i + batch_size], all_y[i:i + batch_size]
-            total_err += (norm_model(xb).argmax(1) != yb).sum().item()
-            n += len(yb)
-    err = total_err / n
-    return {"Error": err, "Acc": 1.0 - err}
+    results = {}
+    all_correct = torch.ones(n_total, dtype=torch.bool, device=device)
+
+    for atk_name, x_adv_atk in dict_adv.items():
+        with torch.no_grad():
+            correct = torch.ones(n_total, dtype=torch.bool, device=device)
+            for i in range(0, n_total, batch_size):
+                xb = x_adv_atk[i:i + batch_size]
+                yb = all_y[i:i + batch_size]
+                correct[i:i + len(yb)] = (norm_model(xb).argmax(1) == yb)
+            all_correct &= correct
+        atk_acc = correct.float().mean().item()
+        results[f"{atk_name}/Error"] = 1.0 - atk_acc
+        results[f"{atk_name}/Acc"] = atk_acc
+        print(f"  AA/{atk_name:12s}  Err={1.0 - atk_acc:.4f}  Acc={atk_acc:.4f}")
+
+    combined_acc = all_correct.float().mean().item()
+    results["Error"] = 1.0 - combined_acc
+    results["Acc"] = combined_acc
+    return results
 
 
 def eval_corruption(norm_model, device, dataset_name, corruption, severity, batch_size=64):
