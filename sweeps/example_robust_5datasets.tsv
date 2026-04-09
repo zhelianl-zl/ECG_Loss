@@ -1,0 +1,29 @@
+#note=Example: Robust training baselines (CE / PGD-AT / TRADES / MART) for 5 datasets
+#note=CIFAR-like eps=8/alpha=2/steps=10; ImageNet-32 same budget
+#note=Set IMAGENET_DS_ROOT to the directory containing train_data_batch_* and val_data
+dataset	seed	stop	stop_val	lr	momentum	batch	workers	half_prec	variants	type	pe_mode	stage1_epochs	stage2_epochs	loss_stage1	loss_stage2	ecg_conf_type	ecg_detach_gates	ecg_schedule	ecg_lam_start	ecg_lam_end	ecg_tau_start	ecg_tau_end	ecg_k_start	ecg_k_end	force_run	method_name	run_kind	env_IMAGENET_ORIGINAL	env_IMAGENET_RES	env_IMAGENET_DS_ROOT	env_DL_WORKERS	wandb_project	wandb_group	wandb_name	train_mode	focal_gamma	focal_alpha	clue_lambda	clue_detach_proxy	robust_eps	robust_alpha	robust_steps	robust_beta	robust_random_start	robust_pixel	clue_dropout_p	clue_mc_passes	clue_alpha	clue_enable_mcdo	rt_step_sample_every	rt_minimal_mode
+# --- BinaryCIFAR-10 (150 epochs, lr=0.01) ---
+binaryCifar10	0	epochs	150	0.01	0.9	64	0	False	none	std	logk_rms	0	150	ce	ce	none	True	none							True	binary_ce_150ep	baseline_main				ecg-loss	robust_example	binary_ce_150ep	standard									True	True					20	True
+binaryCifar10	0	epochs	150	0.01	0.9	64	0	False	none	std	logk_rms	0	150	ce	ce	none	True	none							True	binary_pgdat_eps8	baseline_main				ecg-loss	robust_example	binary_pgdat_eps8	pgd_at					8	2	10		True	True					20	True
+binaryCifar10	0	epochs	150	0.01	0.9	64	0	False	none	std	logk_rms	0	150	ce	ce	none	True	none							True	binary_trades_eps8_b6	baseline_main				ecg-loss	robust_example	binary_trades_eps8_b6	trades					8	2	10	6.0	True	True					20	True
+binaryCifar10	0	epochs	150	0.01	0.9	64	0	False	none	std	logk_rms	0	150	ce	ce	none	True	none							True	binary_mart_eps8_b6	baseline_main				ecg-loss	robust_example	binary_mart_eps8_b6	mart					8	2	10	6.0	True	True					20	True
+# --- CIFAR-10 (60 epochs, lr=0.01) ---
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	none	0	60	ce	ce	none	True	none							True	c10_ce_60ep	baseline_main				ecg-cifar10	robust_example	c10_ce_60ep	standard									True	True					20	True
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	none	0	60	ce	ce	none	True	none							True	c10_pgdat_eps8	baseline_main				ecg-cifar10	robust_example	c10_pgdat_eps8	pgd_at					8	2	10		True	True					20	True
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	none	0	60	ce	ce	none	True	none							True	c10_trades_eps8_b6	baseline_main				ecg-cifar10	robust_example	c10_trades_eps8_b6	trades					8	2	10	6.0	True	True					20	True
+cifar10	0	epochs	60	0.01	0.9	64	0	False	none	std	none	0	60	ce	ce	none	True	none							True	c10_mart_eps8_b6	baseline_main				ecg-cifar10	robust_example	c10_mart_eps8_b6	mart					8	2	10	6.0	True	True					20	True
+# --- CIFAR-100 (60 epochs, lr=0.01) ---
+cifar100	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	0	60	ce	ce	none	True	none							True	c100_ce_60ep	baseline_main				ecg-cifar100	robust_example	c100_ce_60ep	standard									True	True					20	True
+cifar100	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	0	60	ce	ce	none	True	none							True	c100_pgdat_eps8	baseline_main				ecg-cifar100	robust_example	c100_pgdat_eps8	pgd_at					8	2	10		True	True					20	True
+cifar100	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	0	60	ce	ce	none	True	none							True	c100_trades_eps8_b6	baseline_main				ecg-cifar100	robust_example	c100_trades_eps8_b6	trades					8	2	10	6.0	True	True					20	True
+cifar100	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	0	60	ce	ce	none	True	none							True	c100_mart_eps8_b6	baseline_main				ecg-cifar100	robust_example	c100_mart_eps8_b6	mart					8	2	10	6.0	True	True					20	True
+# --- SVHN (60 epochs, lr=0.01) ---
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	0	60	ce	ce	none	True	none							True	svhn_ce_60ep	baseline_main				ecg-svhn	robust_example	svhn_ce_60ep	standard									True	True					20	True
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	0	60	ce	ce	none	True	none							True	svhn_pgdat_eps8	baseline_main				ecg-svhn	robust_example	svhn_pgdat_eps8	pgd_at					8	2	10		True	True					20	True
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	0	60	ce	ce	none	True	none							True	svhn_trades_eps8_b6	baseline_main				ecg-svhn	robust_example	svhn_trades_eps8_b6	trades					8	2	10	6.0	True	True					20	True
+svhn	0	epochs	60	0.01	0.9	64	0	True	none	std	logk_rms	0	60	ce	ce	none	True	none							True	svhn_mart_eps8_b6	baseline_main				ecg-svhn	robust_example	svhn_mart_eps8_b6	mart					8	2	10	6.0	True	True					20	True
+# --- ImageNet-32 (50 epochs, lr=0.01); set IMAGENET_DS_ROOT before submitting ---
+imageNet	0	epochs	50	0.01	0.9	64	0	True	none	std	logk_rms	0	50	ce	ce	none	True	none							True	imnet32_ce_50ep	baseline_main	0	32	/path/to/smallimagenet_32	10	ecg-imagenet32	robust_example	imnet32_ce_50ep	standard									True	True					20	True
+imageNet	0	epochs	50	0.01	0.9	64	0	True	none	std	logk_rms	0	50	ce	ce	none	True	none							True	imnet32_pgdat_eps8	baseline_main	0	32	/path/to/smallimagenet_32	10	ecg-imagenet32	robust_example	imnet32_pgdat_eps8	pgd_at					8	2	10		True	True					20	True
+imageNet	0	epochs	50	0.01	0.9	64	0	True	none	std	logk_rms	0	50	ce	ce	none	True	none							True	imnet32_trades_eps8_b6	baseline_main	0	32	/path/to/smallimagenet_32	10	ecg-imagenet32	robust_example	imnet32_trades_eps8_b6	trades					8	2	10	6.0	True	True					20	True
+imageNet	0	epochs	50	0.01	0.9	64	0	True	none	std	logk_rms	0	50	ce	ce	none	True	none							True	imnet32_mart_eps8_b6	baseline_main	0	32	/path/to/smallimagenet_32	10	ecg-imagenet32	robust_example	imnet32_mart_eps8_b6	mart					8	2	10	6.0	True	True					20	True
