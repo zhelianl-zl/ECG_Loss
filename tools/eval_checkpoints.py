@@ -384,6 +384,12 @@ def eval_autoattack(norm_model, loader, device, eps_01, norm="Linf", version="st
     all_y = torch.cat(all_y).to(device)
 
     adversary = AutoAttack(norm_model, norm=norm, eps=eps_01, version=version, verbose=True)
+
+    num_classes = int(all_y.max().item()) + 1
+    if num_classes < 4:
+        adversary.attacks_to_run = ["apgd-ce", "square"]
+        print(f"  [AutoAttack] {num_classes} classes: using apgd-ce + square only (DLR needs >=4 classes)")
+
     x_adv = adversary.run_standard_evaluation(all_x, all_y, bs=batch_size)
 
     with torch.no_grad():
