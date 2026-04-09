@@ -1,5 +1,9 @@
 #note=Example: Robust training baselines (CE / PGD-AT / TRADES / MART) for 5 datasets
-#note=CIFAR-like eps=8/alpha=2/steps=10; ImageNet-32 same budget
+#note=train_mode: standard=CE only; pgd_at=PGD adversarial training; trades=TRADES; mart=MART
+#note=robust_eps: perturbation budget in pixel scale (0-255). Typical: 8 for CIFAR-like, 4 for ImageNet-32.
+#note=robust_alpha: PGD step size in pixel scale. Typical: 2 (= eps/4).
+#note=robust_steps: number of PGD steps per training batch. Typical: 10.
+#note=robust_beta: KL regularization weight for TRADES/MART. Typical: 6.0. Leave blank for PGD-AT.
 #note=Set IMAGENET_DS_ROOT to the directory containing train_data_batch_* and val_data
 dataset	seed	stop	stop_val	lr	momentum	batch	workers	half_prec	variants	type	pe_mode	stage1_epochs	stage2_epochs	loss_stage1	loss_stage2	ecg_conf_type	ecg_detach_gates	ecg_schedule	ecg_lam_start	ecg_lam_end	ecg_tau_start	ecg_tau_end	ecg_k_start	ecg_k_end	force_run	method_name	run_kind	env_IMAGENET_ORIGINAL	env_IMAGENET_RES	env_IMAGENET_DS_ROOT	env_DL_WORKERS	wandb_project	wandb_group	wandb_name	train_mode	focal_gamma	focal_alpha	clue_lambda	clue_detach_proxy	robust_eps	robust_alpha	robust_steps	robust_beta	robust_random_start	robust_pixel	clue_dropout_p	clue_mc_passes	clue_alpha	clue_enable_mcdo	rt_step_sample_every	rt_minimal_mode
 # --- BinaryCIFAR-10 (150 epochs, lr=0.01) ---

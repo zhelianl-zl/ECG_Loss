@@ -1,0 +1,24 @@
+#slurm_logs_dir=/ocean/projects/cis260049p/zliu49/cegs/ECG_Loss/slurm_logs
+#runs_dir=/ocean/projects/cis260049p/zliu49/cegs_runs
+#data_dir=/ocean/projects/cis260049p/zliu49/cegs
+dataset	source_job	source_task	attacks	adv_eps	adv_steps	autoattack	autoattack_norm	imbalance	wandb_project	wandb_group	wandb_name	env_IMAGENET_ORIGINAL	env_IMAGENET_RES	env_IMAGENET_DS_ROOT	env_DL_WORKERS
+# Binary (eps=8)
+binaryCifar10	37988109	0		8	20	Linf	Linf	none	ecgs-eval-binary	autoattack_v1	aa_binary_ce_j37988109_t0
+binaryCifar10	38017823	1		8	20	Linf	Linf	none	ecgs-eval-binary	autoattack_v1	aa_binary_ecg_j38017823_t1
+binaryCifar10	38432535	1		8	20	Linf	Linf	none	ecgs-eval-binary	autoattack_v1	aa_binary_valley_v2_w5_j38432535_t1
+# CIFAR-10 (eps=8)
+cifar10	38127587	0		8	20	Linf	Linf	none	ecgs-eval-cifar10	autoattack_v1	aa_c10_ce_j38127587_t0
+cifar10	38127145	0		8	20	Linf	Linf	none	ecgs-eval-cifar10	autoattack_v1	aa_c10_ecg_j38127145_t0
+cifar10	38432535	2		8	20	Linf	Linf	none	ecgs-eval-cifar10	autoattack_v1	aa_c10_valley_v2_w5_j38432535_t2
+# CIFAR-100 (eps=8)
+cifar100	37991463	0		8	20	Linf	Linf	none	ecgs-eval-cifar100	autoattack_v1	aa_c100_ce_j37991463_t0
+cifar100	38007062	1		8	20	Linf	Linf	none	ecgs-eval-cifar100	autoattack_v1	aa_c100_ecg_j38007062_t1
+cifar100	38432535	3		8	20	Linf	Linf	none	ecgs-eval-cifar100	autoattack_v1	aa_c100_valley_v2_w5_j38432535_t3
+# SVHN (eps=8)
+svhn	38253772	0		8	20	Linf	Linf	none	ecgs-eval-svhn	autoattack_v1	aa_svhn_ce_j38253772_t0
+svhn	38017315	0		8	20	Linf	Linf	none	ecgs-eval-svhn	autoattack_v1	aa_svhn_ecg_j38017315_t0
+svhn	38432535	0		8	20	Linf	Linf	none	ecgs-eval-svhn	autoattack_v1	aa_svhn_valley_v2_w5_j38432535_t0
+# ImageNet-32 (eps=8)
+imageNet	38591702	0		8	20	Linf	Linf	none	ecgs-eval-imnet32	autoattack_v1	aa_imnet32_ce_j38591702_t0	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	10
+imageNet	38037317	0		8	20	Linf	Linf	none	ecgs-eval-imnet32	autoattack_v1	aa_imnet32_ecg_j38037317_t0	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	10
+imageNet	38563229	0		8	20	Linf	Linf	none	ecgs-eval-imnet32	autoattack_v1	aa_imnet32_valley_v3_w0_j38563229_t0	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	10
