@@ -13,10 +13,9 @@ export WANDB_MODE="${WANDB_MODE:-online}"
 
 mkdir -p "$BASE/slurm_logs"
 
-# AutoAttack is slow: allow 6h per task, run 4 tasks in parallel at most
 sbatch -A cis260049p -p GPU-shared --gres=gpu:v100-32:1 -t 0-06:00:00 \
   --export=ALL \
-  --array=0-14%4 \
+  --array=0-14 \
   "$BASE/scripts/eval_array.sbatch"
 
-echo "Submitted autoattack_eval_v1: tasks 0-14, max 4 parallel"
+echo "Submitted autoattack_eval_v1: tasks 0-14, all parallel"
