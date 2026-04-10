@@ -1,10 +1,10 @@
 #!/bin/bash
-# Submit AutoAttack evaluation for all 15 tasks (5 datasets x 3 runs each)
+# Submit AutoAttack evaluation: 30 array tasks (5 datasets x 3 models x eps4 + eps2)
 # Usage: bash scripts/submit_autoattack.sh
 set -euo pipefail
 
 BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CONF="$BASE/sweeps/autoattack_eval_v1.tsv"
+CONF="$BASE/sweeps/autoattack_eval_v2.tsv"
 
 export BASE CONF
 export DATA_DIR="${DATA_DIR:-/ocean/projects/cis260049p/zliu49/cegs}"
@@ -18,4 +18,4 @@ sbatch -A cis260049p -p GPU-shared --gres=gpu:v100-32:1 -t 0-06:00:00 \
   --array=0-29 \
   "$BASE/scripts/eval_array.sbatch"
 
-echo "Submitted autoattack_eval_v1: tasks 0-29 (0-14=eps4, 15-29=eps2)"
+echo "Submitted autoattack_eval_v2: tasks 0-29 (0-14=eps4, 15-29=eps2); last_ckpt_only in TSV"

@@ -828,7 +828,16 @@ def run_eval(args):
     norm_model = NormalizeModel(raw_model, mean, std).to(device)
 
     test_loader, _ = build_test_loader(ds, batch_size=args.batch_size)
-    print(f"Dataset: {ds}  |  Checkpoints: {len(ckpts)}  |  Device: {device}")
+    print(
+        f"Dataset: {ds}  |  Checkpoints: {len(ckpts)}  |  "
+        f"last_ckpt_only: {bool(getattr(args, 'last_ckpt_only', False))}  |  Device: {device}"
+    )
+    aa_on = getattr(args, "autoattack", "").strip().lower() in (
+        "1", "true", "yes", "linf", "l2", "both")
+    if aa_on and len(ckpts) > 1 and not bool(getattr(args, "last_ckpt_only", False)):
+        print("  [WARN] AutoAttack + multiple checkpoints + last_ckpt_only=False: "
+              "W&B logs one point per epoch. Set last_ckpt_only=True in the TSV or --last_ckpt_only "
+              "to evaluate only the final *_epoch*.pt.")
     print(f"Normalization: mean={mean}  std={std}")
 
     attacks = [a.strip() for a in args.attacks.split(",") if a.strip()] if args.attacks else []

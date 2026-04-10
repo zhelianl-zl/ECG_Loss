@@ -1,0 +1,46 @@
+# Same 30-run matrix as autoattack_eval_v1.tsv; use this name if your Slurm/CONF expects v2.
+# Every data row MUST keep last_ckpt_only=True unless you intentionally want per-epoch AA curves.
+#slurm_logs_dir=/ocean/projects/cis260049p/zliu49/cegs/ECG_Loss/slurm_logs
+#runs_dir=/ocean/projects/cis260049p/zliu49/cegs_runs
+#data_dir=/ocean/projects/cis260049p/zliu49/cegs
+dataset	source_job	source_task	attacks	adv_eps	adv_steps	autoattack	autoattack_norm	imbalance	wandb_project	wandb_group	wandb_name	env_IMAGENET_ORIGINAL	env_IMAGENET_RES	env_IMAGENET_DS_ROOT	env_DL_WORKERS	last_ckpt_only
+# Binary (eps=4)
+binaryCifar10	37988109	0		4	20	Linf	Linf	none	ecgs-eval-binary	autoattack_eps4	aa_binary_ce_eps4_j37988109_t0					True
+binaryCifar10	38017823	1		4	20	Linf	Linf	none	ecgs-eval-binary	autoattack_eps4	aa_binary_ecg_eps4_j38017823_t1					True
+binaryCifar10	38432535	1		4	20	Linf	Linf	none	ecgs-eval-binary	autoattack_eps4	aa_binary_valley_v2_w5_eps4_j38432535_t1					True
+# CIFAR-10 (eps=4)
+cifar10	38127587	0		4	20	Linf	Linf	none	ecgs-eval-cifar10	autoattack_eps4	aa_c10_ce_eps4_j38127587_t0					True
+cifar10	38127145	0		4	20	Linf	Linf	none	ecgs-eval-cifar10	autoattack_eps4	aa_c10_ecg_eps4_j38127145_t0					True
+cifar10	38432535	2		4	20	Linf	Linf	none	ecgs-eval-cifar10	autoattack_eps4	aa_c10_valley_v2_w5_eps4_j38432535_t2					True
+# CIFAR-100 (eps=4)
+cifar100	37991463	0		4	20	Linf	Linf	none	ecgs-eval-cifar100	autoattack_eps4	aa_c100_ce_eps4_j37991463_t0					True
+cifar100	38007062	1		4	20	Linf	Linf	none	ecgs-eval-cifar100	autoattack_eps4	aa_c100_ecg_eps4_j38007062_t1					True
+cifar100	38432535	3		4	20	Linf	Linf	none	ecgs-eval-cifar100	autoattack_eps4	aa_c100_valley_v2_w5_eps4_j38432535_t3					True
+# SVHN (eps=4)
+svhn	38253772	0		4	20	Linf	Linf	none	ecgs-eval-svhn	autoattack_eps4	aa_svhn_ce_eps4_j38253772_t0					True
+svhn	38017315	0		4	20	Linf	Linf	none	ecgs-eval-svhn	autoattack_eps4	aa_svhn_ecg_eps4_j38017315_t0					True
+svhn	38432535	0		4	20	Linf	Linf	none	ecgs-eval-svhn	autoattack_eps4	aa_svhn_valley_v2_w5_eps4_j38432535_t0					True
+# ImageNet-32 (eps=4)
+imageNet	38591702	0		4	20	Linf	Linf	none	ecgs-eval-imnet32	autoattack_eps4	aa_imnet32_ce_eps4_j38591702_t0	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	10	True
+imageNet	38037317	0		4	20	Linf	Linf	none	ecgs-eval-imnet32	autoattack_eps4	aa_imnet32_ecg_eps4_j38037317_t0	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	10	True
+imageNet	38563229	0		4	20	Linf	Linf	none	ecgs-eval-imnet32	autoattack_eps4	aa_imnet32_valley_v3_w0_eps4_j38563229_t0	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	10	True
+# Binary (eps=2)
+binaryCifar10	37988109	0		2	20	Linf	Linf	none	ecgs-eval-binary	autoattack_eps2	aa_binary_ce_eps2_j37988109_t0					True
+binaryCifar10	38017823	1		2	20	Linf	Linf	none	ecgs-eval-binary	autoattack_eps2	aa_binary_ecg_eps2_j38017823_t1					True
+binaryCifar10	38432535	1		2	20	Linf	Linf	none	ecgs-eval-binary	autoattack_eps2	aa_binary_valley_v2_w5_eps2_j38432535_t1					True
+# CIFAR-10 (eps=2)
+cifar10	38127587	0		2	20	Linf	Linf	none	ecgs-eval-cifar10	autoattack_eps2	aa_c10_ce_eps2_j38127587_t0					True
+cifar10	38127145	0		2	20	Linf	Linf	none	ecgs-eval-cifar10	autoattack_eps2	aa_c10_ecg_eps2_j38127145_t0					True
+cifar10	38432535	2		2	20	Linf	Linf	none	ecgs-eval-cifar10	autoattack_eps2	aa_c10_valley_v2_w5_eps2_j38432535_t2					True
+# CIFAR-100 (eps=2)
+cifar100	37991463	0		2	20	Linf	Linf	none	ecgs-eval-cifar100	autoattack_eps2	aa_c100_ce_eps2_j37991463_t0					True
+cifar100	38007062	1		2	20	Linf	Linf	none	ecgs-eval-cifar100	autoattack_eps2	aa_c100_ecg_eps2_j38007062_t1					True
+cifar100	38432535	3		2	20	Linf	Linf	none	ecgs-eval-cifar100	autoattack_eps2	aa_c100_valley_v2_w5_eps2_j38432535_t3					True
+# SVHN (eps=2)
+svhn	38253772	0		2	20	Linf	Linf	none	ecgs-eval-svhn	autoattack_eps2	aa_svhn_ce_eps2_j38253772_t0					True
+svhn	38017315	0		2	20	Linf	Linf	none	ecgs-eval-svhn	autoattack_eps2	aa_svhn_ecg_eps2_j38017315_t0					True
+svhn	38432535	0		2	20	Linf	Linf	none	ecgs-eval-svhn	autoattack_eps2	aa_svhn_valley_v2_w5_eps2_j38432535_t0					True
+# ImageNet-32 (eps=2)
+imageNet	38591702	0		2	20	Linf	Linf	none	ecgs-eval-imnet32	autoattack_eps2	aa_imnet32_ce_eps2_j38591702_t0	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	10	True
+imageNet	38037317	0		2	20	Linf	Linf	none	ecgs-eval-imnet32	autoattack_eps2	aa_imnet32_ecg_eps2_j38037317_t0	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	10	True
+imageNet	38563229	0		2	20	Linf	Linf	none	ecgs-eval-imnet32	autoattack_eps2	aa_imnet32_valley_v3_w0_eps2_j38563229_t0	0	32	/ocean/projects/cis260049p/zliu49/cegs_data/smallimagenet_32	10	True
